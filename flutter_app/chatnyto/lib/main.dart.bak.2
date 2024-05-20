@@ -1,0 +1,103 @@
+import 'package:flutter/material.dart';
+import 'package:mqtt_client/mqtt_client.dart';
+import 'package:mqtt_client/mqtt_server_client.dart';
+
+void main() {
+  runApp(MyApp());
+}
+
+class MyApp extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'MQTT Chat App',
+      home: ChatPage(),
+    );
+  }
+}
+
+class ChatPage extends StatefulWidget {
+  @override
+  _ChatPageState createState() => _ChatPageState();
+}
+
+class _ChatPageState extends State<ChatPage> {
+  MqttServerClient? _mqttClient;
+  List<String> _messages = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _connectToMqttBroker();
+  }
+
+  void _connectToMqttBroker() {
+    // Connect to the MQTT broker and subscribe to the chat topic
+    _mqttClient = MqttServerClient('mqtt://localhost', 'clientId');
+    _mqttClient?.updates?.listen((event) {
+      final message = event[0].payload as String;
+      setState(() {
+        _messages.add(message);
+      });
+    });
+    _mqttClient?.subscribe('chat', MqttQos.atMostOnce);
+  }
+
+  void _sendMessage(String message) {
+    // Publish a new message to the chat topic
+    final builder = MqttClientPayloadBuilder();
+    builder.addString(message);
+    _mqttClient?.publishMessage('chat', MqttQos.atMostOnce, builder.payload!);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('MQTT Chat App'),
+      ),
+      body: Column(
+        children: [
+          Expanded(
+            child: ListView.builder(
+              itemCount: _messages.length,
+              itemBuilder: (context, index) {
+                return ListTile(
+                  title: Text(_messages[index]),
+                );
+              },
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(8.0),
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    onSubmitted: _sendMessage,
+                    decoration: InputDecoration(
+                      hintText: 'Type a message...',
+                    ),
+                  ),
+                ),
+                IconButton(
+                  icon: Icon(Icons.send),
+                  onPressed: () {
+                    // Send the message
+                  },
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    _mqttClient?.unsubscribe('chat');
+    _mqttClient?.disconnect();
+    super.dispose();
+  }
+}
