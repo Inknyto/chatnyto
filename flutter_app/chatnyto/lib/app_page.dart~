@@ -1,0 +1,66 @@
+import 'package:flutter/material.dart';
+import 'bottom_nav_bar.dart';
+import 'notifications_page.dart';
+import 'connection_page.dart';
+import 'ChatPage/ChatPage.dart';
+
+class AppPage extends StatefulWidget {
+  const AppPage({super.key});
+
+  @override
+  State<AppPage> createState() => _AppPageState();
+}
+
+class _AppPageState extends State<AppPage> {
+  int _currentIndex = 0;
+  final PageController _pageController = PageController(initialPage: 0);
+  final List<Widget> pages = [
+
+    const HomePage(),
+    const NotificationsPage(),
+    const SearchPage(),
+    const ConnectionPage(),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text("L'appli de tes rêves"),
+        backgroundColor: const Color(0xFF1B1926),
+        elevation: 0.0,
+        centerTitle: true,
+      ),
+      body: PageView(
+        controller: _pageController,
+        children: pages,
+        onPageChanged: (int index) {
+          setState(() {
+            _currentIndex = index;
+          });
+        },
+      ),
+      bottomNavigationBar: BottomNavigationBarWidget(
+        currentIndex: _currentIndex,
+        pageController: _pageController,
+        onTabTapped: (int index) {
+          setState(() {
+            _currentIndex = index;
+          });
+          _pageController.animateToPage(
+            _currentIndex,
+            duration: const Duration(milliseconds: 500),
+            curve: Curves.ease,
+          );
+        },
+      ),
+      backgroundColor: const Color(0xFF1B1926),
+    );
+  }
+
+  @override
+  void dispose() {
+    _pageController.dispose();
+    super.dispose();
+  }
+}

@@ -1,0 +1,58 @@
+const express = require('express');
+const mqtt = require('mqtt');
+
+const app = express();
+const broker = mqtt.Server();
+
+// Start the MQTT broker
+broker.listen(1883);
+
+// Parse JSON request bodies
+app.use(express.json());
+
+// Start the Express server
+const port = 3000;
+
+// Register a new device
+app.post('/devices', (req, res) => {
+  const deviceId = req.body.deviceId;
+  // Add device registration logic here
+  res.status(201).json({ deviceId });
+});
+
+// Subscribe to a device's data stream
+app.post('/devices/:deviceId/subscribe', (req, res) => {
+  const deviceId = req.params.deviceId;
+  const topic = `devices/${deviceId}/data`;
+
+  broker.subscribe(topic, (err) => {
+    if (err) {
+      return res.status(500).json({ error: 'Failed to subscribe' });
+    }
+
+    broker.on('message', (topic, message) => {
+      // Handle incoming messages from the device
+      console.log(`Received message from ${topic}: ${message.toString()}`);
+    });
+
+    res.status(200).json({ message: 'Subscribed successfully' });
+  });
+});
+
+// Publish data to a device
+app.post('/devices/:deviceId/publish', (req, res) => {
+  const deviceId = req.params.deviceId;
+  const data = req.body.data;
+  const topic = `devices/${deviceId}/data`;
+
+  broker.publish(topic, data, (err) => {
+    if (err) {
+      return res.status(500).json({ error: 'Failed to publish data' });
+    }
+    res.status(200).json({ message: 'Data published successfully' });
+  });
+});
+
+app.listen(port, () => {
+  console.log(`Server running on port ${port}`);
+});

@@ -1,0 +1,80 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_svg/flutter_svg.dart';
+
+class BottomNavigationBarWidget extends StatelessWidget {
+  final int currentIndex;
+  final PageController pageController;
+  final ValueChanged<int> onTabTapped;
+
+  const BottomNavigationBarWidget({
+    super.key,
+    required this.currentIndex,
+    required this.pageController,
+    required this.onTabTapped,
+  });
+
+  BottomNavigationBarItem buildNavItem(String iconPath, int index) {
+    return BottomNavigationBarItem(
+      icon: SizedBox(
+        height: 72,
+        child: Stack(
+          children: [
+            SvgPicture.asset(iconPath,
+                width: 55,
+                height: 55,
+                colorFilter: ColorFilter.mode(
+                    currentIndex == index ? Colors.white : Colors.grey,
+                    BlendMode.srcIn)),
+            if (currentIndex == index)
+              Positioned(
+                top: 62,
+                left: 0,
+                right: 0,
+                child: SvgPicture.asset(
+                  'assets/underline.svg',
+                  width: 55,
+                  height: 8,
+                  colorFilter: const ColorFilter.mode(Colors.white, BlendMode.srcIn),
+                  fit: BoxFit.fill,
+                ),
+              ),
+          ],
+        ),
+      ),
+      label: '',
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return BottomNavigationBar(
+      type: BottomNavigationBarType.fixed,
+      items: [
+        buildNavItem('assets/Home_fill.svg', 0),
+        buildNavItem('assets/Bell_fill.svg', 1),
+        buildNavItem('assets/Search_alt_fill.svg', 2),
+        buildNavItem('assets/User_box_fill.svg', 3),
+      ],
+      currentIndex: currentIndex,
+      onTap: onTabTapped,
+      backgroundColor: const Color(0xFF1B1926),
+      selectedItemColor: Colors.white,
+      unselectedItemColor: Colors.white,
+      selectedLabelStyle: const TextStyle(
+        color: Colors.white,
+        decoration: TextDecoration.underline,
+      ),
+      unselectedLabelStyle: const TextStyle(
+        color: Colors.white,
+      ),
+      selectedFontSize: 12.0,
+      unselectedFontSize: 12.0,
+      showSelectedLabels: true,
+      showUnselectedLabels: true,
+      selectedIconTheme: const IconThemeData(
+        color: Colors.white,
+        size: 24.0,
+      ),
+    );
+  }
+}
