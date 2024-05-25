@@ -1,19 +1,19 @@
+// chat_page/chat_page.dart
+
 import 'package:flutter/foundation.dart';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:mqtt_client/mqtt_client.dart';
 import 'package:mqtt_client/mqtt_server_client.dart';
 
-
 class ChatPage extends StatefulWidget {
-  const ChatPage({super.key});
+  const ChatPage({super.key, required this.updateBrokerIP});
+
+  final Function(String) updateBrokerIP;
 
   @override
   ChatPageState createState() => ChatPageState();
 }
-
-
-
 
 class ChatPageState extends State<ChatPage> {
   MqttServerClient? _mqttClient;
@@ -36,6 +36,7 @@ class ChatPageState extends State<ChatPage> {
       if (kDebugMode) {
         print('Connected to MQTT broker');
       }
+
       // Subscribe to the chat topic
       _mqttClient?.subscribe('chat', MqttQos.atMostOnce);
     };
@@ -57,7 +58,6 @@ class ChatPageState extends State<ChatPage> {
       final pubMess = recMess as MqttPublishMessage;
       final topicName = pubMess.variableHeader?.topicName;
       final message = utf8.decode(pubMess.payload.message);
-
       print(pubMess.variableHeader?.topicName);
       setState(() {
         _messages.add('Topic Name: $topicName\nMessage: $message');
@@ -82,7 +82,7 @@ class ChatPageState extends State<ChatPage> {
   }
 
   void updateBrokerIP(String newBrokerIP) {
-  print('updating broker ip...');
+    print('updating broker ip...');
     setState(() {
       _brokerIP = newBrokerIP;
     });

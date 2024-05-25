@@ -1,0 +1,5 @@
+error from Inknyto: "flutter build windows" only supported on Windows hosts.
+
+task: Build the flutter app for windows, and make a pull request for the first
+
+windows release

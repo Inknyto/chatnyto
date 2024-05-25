@@ -1,0 +1,23 @@
+# By Inknyto
+signup
+signin
+with ai as taskers, daemons and guests:
+	show devices on same network (maybe remotely later)
+	message person on same network (maybe remotely later)
+	group chat on same network (maybe remotely later)
+	phone call person on same network (maybe remotely later)
+	video call person on same network (maybe remotely later)
+	ring phone on same network (maybe remotely later)
+	see iot devices on same network (maybe remotely later)
+	schedule tasks on same network (maybe remotely later)
+show online status
+control * devices
+change broker ip and chat topic
+ask ai about images or things 
+talk to ai
+let ai guide you visually
+ask ai about places where things are in the house, 
+e.g when you lose something
+ask ai who is in which room of the house (voice recognition and image
+processing)
+
