@@ -15,30 +15,21 @@ class ChatPageState extends State<ChatPage> {
   MqttServerClient? _mqttClient;
   final List<String> _messages = [];
   final _messageController = TextEditingController();
-  String _brokerIP = '127.0.0.1'; // Default broker IP address
+  String _currentBrokerIP = '127.0.0.1'; // Default broker IP address
   final _brokerIPController = TextEditingController();
-  String _newBrokerIP = ''; // New state variable to store the new broker IP
 
   @override
   void initState() {
     super.initState();
-    _connectToMqttBroker(_brokerIP);
+    _mqttClient = MqttServerClient(_currentBrokerIP, 'clientId');
+    _connectToMqttBroker(_currentBrokerIP);
   }
 
-  void _connectToMqttBroker(brokerIP) {
-    // If the client is already connected, disconnect first
-    if (_mqttClient != null &&
-        _mqttClient!.connectionStatus!.state == MqttConnectionState.connected) {
-      _mqttClient!.disconnect();
-    }
-
-    // Connect to the MQTT broker
-    _mqttClient = MqttServerClient(brokerIP, 'clientId');
-
+  void _connectToMqttBroker(String brokerIP) {
     // Listen for the connected event
     _mqttClient?.onConnected = () {
       if (kDebugMode) {
-        print('Connected to MQTT broker');
+        print('Connected to MQTT broker: $brokerIP');
       }
 
       // Subscribe to the chat topic
@@ -48,7 +39,7 @@ class ChatPageState extends State<ChatPage> {
     // Listen for the disconnected event
     _mqttClient?.onDisconnected = () {
       if (kDebugMode) {
-        print('Disconnected from MQTT broker');
+        print('Disconnected from MQTT broker: $brokerIP');
       }
     };
 
@@ -62,9 +53,6 @@ class ChatPageState extends State<ChatPage> {
       final pubMess = recMess as MqttPublishMessage;
       final topicName = pubMess.variableHeader?.topicName;
       final message = utf8.decode(pubMess.payload.message);
-      print("topicName: $pubMess.variableHeader?.topicName");
-      print("message: $message");
-      print("_brokerIP: $_brokerIP");
       setState(() {
         _messages.add('Topic Name: $topicName\nMessage: $message');
       });
@@ -88,17 +76,10 @@ class ChatPageState extends State<ChatPage> {
   }
 
   void updateBrokerIP(String newBrokerIP) {
-    print('updating broker ip...');
     setState(() {
-      _brokerIP = newBrokerIP;
+      _currentBrokerIP = newBrokerIP;
     });
-    _reconnectToMqttBroker();
-  }
-
-  void _reconnectToMqttBroker() {
-    _mqttClient?.disconnect();
-    _mqttClient = null; // Reset the _mqttClient instance
-    _connectToMqttBroker(_brokerIP);
+    _connectToMqttBroker(newBrokerIP);
   }
 
   @override
@@ -151,17 +132,13 @@ class ChatPageState extends State<ChatPage> {
                     decoration: const InputDecoration(
                       hintText: 'Enter new broker IP...',
                     ),
-                    onSubmitted: (value) {
-                      setState(() {
-                        _newBrokerIP = value;
-                      });
-                    },
+                    onSubmitted: updateBrokerIP,
                   ),
                 ),
                 IconButton(
                   icon: const Icon(Icons.update),
                   onPressed: () {
-                    updateBrokerIP(_newBrokerIP);
+                    updateBrokerIP(_brokerIPController.text);
                   },
                 ),
               ],
