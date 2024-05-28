@@ -1,0 +1,54 @@
+import { useState, useEffect } from 'react';
+import { Text, View } from 'react-native';
+import * as mqtt from './mqtt'
+
+
+const MQTT_BROKER = 'mqtt://165.232.129.240'; // Modifiez le protocole et supprimez le port
+const MQTT_USERNAME = 'invite'; // MQTT username
+const MQTT_PASSWORD = 'invite'; // MQTT password
+
+const topicTemperature = 'esp/temperature';
+const topicHumidity = 'esp/humidity';
+
+const App = () => {
+  const [temperature, setTemperature] = useState(0);
+  const [humidity, setHumidity] = useState(0);
+
+  useEffect(() => {
+    // Connexion au broker MQTT avec nom d'utilisateur et mot de passe
+    const client = mqtt.connect(MQTT_BROKER, {
+      username: MQTT_USERNAME,
+      password: MQTT_PASSWORD,
+    });
+
+    client.on('connect', () => {
+      console.log('Connected to MQTT broker');
+      client.subscribe(topicTemperature);
+      client.subscribe(topicHumidity);
+    });
+
+    client.on('message', (topic, message) => {
+      // Réception des données MQTT
+      const data = JSON.parse(message.toString());
+      if (topic === topicTemperature) {
+        setTemperature(data.temperature);
+      } else if (topic === topicHumidity) {
+        setHumidity(data.humidity);
+      }
+    });
+
+    // Nettoyage de la connexion MQTT lors du démontage du composant
+    return () => {
+      client.end();
+    };
+  }, []);
+
+  return (
+    <View>
+      <Text>Temperature: {temperature}°C</Text>
+      <Text>Humidity: {humidity}%</Text>
+    </View>
+  );
+};
+
+export default App;

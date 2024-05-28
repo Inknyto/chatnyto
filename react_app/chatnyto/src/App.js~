@@ -7,7 +7,7 @@ const MQTTChatApp = () => {
   const [client, setClient] = useState(null);
 
   useEffect(() => {
-    const mqttClient = mqtt.connect('mqtt://localhost');
+    const mqttClient = mqtt.connect('localhost');
     setClient(mqttClient);
 
     mqttClient.on('connect', () => {
