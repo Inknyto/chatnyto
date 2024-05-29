@@ -3,6 +3,7 @@ import 'bottom_nav_bar.dart';
 import 'notifications_page/notifications_page.dart';
 import 'connection_page/connection_page.dart';
 import 'chat_page/chat_page.dart';
+import 'chatbot_page/chatbot_page.dart';
 
 class AppPage extends StatefulWidget {
   const AppPage({super.key});
@@ -24,7 +25,11 @@ class _AppPageState extends State<AppPage> {
     pages = [
       ChatPage(brokerIP: _brokerIP),
       const NotificationsPage(),
-      ConnectionPage(updateBrokerIP: updateBrokerIP),
+      ConnectionPage(
+        updateBrokerIP: updateBrokerIP,
+        brokerIP: _brokerIP,
+      ),
+      ChatBotPage(),
     ];
   }
 
@@ -32,7 +37,8 @@ class _AppPageState extends State<AppPage> {
     setState(() {
       _brokerIP = newBrokerIP;
       pages[0] = ChatPage(brokerIP: _brokerIP);
-      pages[2] = ConnectionPage(updateBrokerIP: updateBrokerIP, brokerIP: _brokerIP),
+      pages[2] =
+          ConnectionPage(updateBrokerIP: updateBrokerIP, brokerIP: _brokerIP);
     });
   }
 
@@ -48,15 +54,14 @@ class _AppPageState extends State<AppPage> {
         currentIndex: _currentIndex,
         pageController: _pageController,
         onTabTapped: (int index) {
-          
-            setState(() {
-              _currentIndex = index;
-              _pageController.animateToPage(
-                index,
-                duration: const Duration(milliseconds: 500),
-                curve: Curves.ease,
-              );
-            });
+          setState(() {
+            _currentIndex = index;
+            _pageController.animateToPage(
+              index,
+              duration: const Duration(milliseconds: 500),
+              curve: Curves.ease,
+            );
+          });
         },
       ),
       backgroundColor: const Color(0xFF1B1926),

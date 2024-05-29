@@ -14,20 +14,19 @@ class ConnectionPage extends StatefulWidget {
 }
 
 class _ConnectionPageState extends State<ConnectionPage> {
-  late TextEditingController _brokerIPController ;
-  
+  late TextEditingController _brokerIPController;
+
   @override
   void initState() {
     super.initState();
     _brokerIPController = TextEditingController(text: widget.brokerIP);
   }
-  
+
   @override
   void dispose() {
     _brokerIPController.dispose();
     super.dispose();
   }
-
 
   @override
   Widget build(BuildContext context) {

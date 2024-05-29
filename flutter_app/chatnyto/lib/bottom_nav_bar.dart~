@@ -85,9 +85,7 @@ class _BottomNavigationBarWidgetState extends State<BottomNavigationBarWidget>
           ],
         ),
       ),
-      // hack
       label: '',
-      //end hack
     );
   }
 
