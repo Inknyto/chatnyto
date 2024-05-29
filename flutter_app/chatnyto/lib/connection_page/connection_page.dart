@@ -4,14 +4,30 @@ import 'package:flutter/material.dart';
 class ConnectionPage extends StatefulWidget {
   final Function(String) updateBrokerIP;
 
-  const ConnectionPage({super.key, required this.updateBrokerIP});
+  final String brokerIP;
+
+  const ConnectionPage(
+      {super.key, required this.updateBrokerIP, required this.brokerIP});
 
   @override
   State<ConnectionPage> createState() => _ConnectionPageState();
 }
 
 class _ConnectionPageState extends State<ConnectionPage> {
-  final _brokerIPController = TextEditingController(text: '127.0.0.1');
+  late TextEditingController _brokerIPController ;
+  
+  @override
+  void initState() {
+    super.initState();
+    _brokerIPController = TextEditingController(text: widget.brokerIP);
+  }
+  
+  @override
+  void dispose() {
+    _brokerIPController.dispose();
+    super.dispose();
+  }
+
 
   @override
   Widget build(BuildContext context) {

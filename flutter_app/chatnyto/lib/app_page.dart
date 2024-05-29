@@ -24,7 +24,10 @@ class _AppPageState extends State<AppPage> {
     pages = [
       ChatPage(brokerIP: _brokerIP),
       const NotificationsPage(),
-      ConnectionPage(updateBrokerIP: updateBrokerIP),
+      ConnectionPage(
+        updateBrokerIP: updateBrokerIP,
+        brokerIP: _brokerIP,
+      ),
     ];
   }
 
@@ -32,9 +35,9 @@ class _AppPageState extends State<AppPage> {
     setState(() {
       _brokerIP = newBrokerIP;
       pages[0] = ChatPage(brokerIP: _brokerIP);
+      pages[2] =
+          ConnectionPage(updateBrokerIP: updateBrokerIP, brokerIP: _brokerIP);
     });
-
-    // Navigate to the ChatPage
   }
 
   @override
@@ -49,15 +52,14 @@ class _AppPageState extends State<AppPage> {
         currentIndex: _currentIndex,
         pageController: _pageController,
         onTabTapped: (int index) {
-          
-            setState(() {
-              _currentIndex = index;
-              _pageController.animateToPage(
-                index,
-                duration: const Duration(milliseconds: 500),
-                curve: Curves.ease,
-              );
-            });
+          setState(() {
+            _currentIndex = index;
+            _pageController.animateToPage(
+              index,
+              duration: const Duration(milliseconds: 500),
+              curve: Curves.ease,
+            );
+          });
         },
       ),
       backgroundColor: const Color(0xFF1B1926),
