@@ -3,6 +3,7 @@ import 'bottom_nav_bar.dart';
 import 'notifications_page/notifications_page.dart';
 import 'connection_page/connection_page.dart';
 import 'chat_page/chat_page.dart';
+import 'chatbot_page/chatbot_page.dart';
 
 class AppPage extends StatefulWidget {
   const AppPage({super.key});
@@ -28,6 +29,7 @@ class _AppPageState extends State<AppPage> {
         updateBrokerIP: updateBrokerIP,
         brokerIP: _brokerIP,
       ),
+      ChatBotPage(),
     ];
   }
 

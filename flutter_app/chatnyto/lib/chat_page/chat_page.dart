@@ -79,7 +79,7 @@ void updateBrokerIP(String newBrokerIP) {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('MQTT Chat App'),
+        title: const Text('Chatnyto'),
       ),
       body: Column(
         children: [
