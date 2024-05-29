@@ -1,3 +1,5 @@
+// chat_page/chat_page.dart
+
 import 'package:flutter/foundation.dart';
 import 'dart:convert';
 import 'package:flutter/material.dart';
@@ -5,48 +7,40 @@ import 'package:mqtt_client/mqtt_client.dart';
 import 'package:mqtt_client/mqtt_server_client.dart';
 
 class ChatPage extends StatefulWidget {
-  const ChatPage({super.key});
+  const ChatPage({super.key, required this.brokerIP});
+
+  final String brokerIP;
 
   @override
-  ChatPageState createState() => ChatPageState();
+  State<ChatPage> createState() => _ChatPageState();
 }
 
-class ChatPageState extends State<ChatPage> {
+class _ChatPageState extends State<ChatPage> {
   MqttServerClient? _mqttClient;
   final List<String> _messages = [];
   final _messageController = TextEditingController();
-  String _currentBrokerIP = '127.0.0.1'; // Default broker IP address
-  final _brokerIPController = TextEditingController();
 
   @override
   void initState() {
     super.initState();
-    _mqttClient = MqttServerClient(_currentBrokerIP, 'clientId');
-    _connectToMqttBroker(_currentBrokerIP);
+    _connectToMqttBroker(widget.brokerIP);
   }
 
   void _connectToMqttBroker(String brokerIP) {
-    // Listen for the connected event
+    _mqttClient = MqttServerClient(brokerIP, 'clientId');
     _mqttClient?.onConnected = () {
       if (kDebugMode) {
-        print('Connected to MQTT broker: $brokerIP');
+        print('Connected to MQTT broker: ${widget.brokerIP}');
       }
-
-      // Subscribe to the chat topic
       _mqttClient?.subscribe('chat', MqttQos.atMostOnce);
     };
-
-    // Listen for the disconnected event
     _mqttClient?.onDisconnected = () {
       if (kDebugMode) {
-        print('Disconnected from MQTT broker: $brokerIP');
+        print('Disconnected from MQTT broker: ${widget.brokerIP}');
       }
     };
-
-    // Connect to the broker
-    _mqttClient?.connect();
-
-    // Listen for incoming messages
+    _mqttClient?.connect(widget.brokerIP);
+    print(widget.brokerIP);
     _mqttClient?.updates
         ?.listen((List<MqttReceivedMessage<MqttMessage?>> event) {
       final recMess = event[0].payload;
@@ -59,27 +53,26 @@ class ChatPageState extends State<ChatPage> {
     });
   }
 
+void updateBrokerIP(String newBrokerIP) {
+  _mqttClient?.unsubscribe('chat');
+  _mqttClient?.disconnect();
+  _mqttClient = null;
+  _connectToMqttBroker(newBrokerIP);
+}
+
   void _sendMessage(String message) {
-    // Check if the client is connected
+    print("message to be sent: $message");
+    print(widget.brokerIP);
     if (_mqttClient?.connectionStatus?.state == MqttConnectionState.connected) {
-      // Publish a new message to the chat topic
       final builder = MqttClientPayloadBuilder();
       builder.addString(message);
       _mqttClient?.publishMessage('chat', MqttQos.atMostOnce, builder.payload!);
       _messageController.clear();
     } else {
-      // Handle the case when the client is not connected
       if (kDebugMode) {
         print('MQTT client is not connected.');
       }
     }
-  }
-
-  void updateBrokerIP(String newBrokerIP) {
-    setState(() {
-      _currentBrokerIP = newBrokerIP;
-    });
-    _connectToMqttBroker(newBrokerIP);
   }
 
   @override
@@ -115,31 +108,7 @@ class ChatPageState extends State<ChatPage> {
                 ),
                 IconButton(
                   icon: const Icon(Icons.send),
-                  onPressed: () {
-                    _sendMessage(_messageController.text);
-                  },
-                ),
-              ],
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.all(8.0),
-            child: Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _brokerIPController,
-                    decoration: const InputDecoration(
-                      hintText: 'Enter new broker IP...',
-                    ),
-                    onSubmitted: updateBrokerIP,
-                  ),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.update),
-                  onPressed: () {
-                    updateBrokerIP(_brokerIPController.text);
-                  },
+                  onPressed: () => _sendMessage(_messageController.text),
                 ),
               ],
             ),
@@ -153,7 +122,6 @@ class ChatPageState extends State<ChatPage> {
   void dispose() {
     _mqttClient?.unsubscribe('chat');
     _mqttClient?.disconnect();
-    _brokerIPController.dispose();
     _messageController.dispose();
     super.dispose();
   }
