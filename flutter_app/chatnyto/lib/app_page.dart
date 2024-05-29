@@ -14,12 +14,28 @@ class AppPage extends StatefulWidget {
 class _AppPageState extends State<AppPage> {
   int _currentIndex = 0;
   final PageController _pageController = PageController(initialPage: 0);
-  final List<Widget> pages = [
-    ChatPage(
-        key: GlobalKey<ChatPageState>()), // Pass the GlobalKey to the ChatPage
-    const NotificationsPage(),
-    const ConnectionPage(),
-  ];
+  String _brokerIP = '127.0.0.1'; // Initial broker IP
+
+  late List<Widget> pages;
+
+  @override
+  void initState() {
+    super.initState();
+    pages = [
+      ChatPage(brokerIP: _brokerIP),
+      const NotificationsPage(),
+      ConnectionPage(updateBrokerIP: updateBrokerIP),
+    ];
+  }
+
+  void updateBrokerIP(String newBrokerIP) {
+    setState(() {
+      _brokerIP = newBrokerIP;
+      pages[0] = ChatPage(brokerIP: _brokerIP);
+    });
+
+    // Navigate to the ChatPage
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -27,24 +43,21 @@ class _AppPageState extends State<AppPage> {
       body: PageView(
         controller: _pageController,
         children: pages,
-        onPageChanged: (int index) {
-          setState(() {
-            _currentIndex = index;
-          });
-        },
+        onPageChanged: (int index) => setState(() => _currentIndex = index),
       ),
       bottomNavigationBar: BottomNavigationBarWidget(
         currentIndex: _currentIndex,
         pageController: _pageController,
         onTabTapped: (int index) {
-          setState(() {
-            _currentIndex = index;
-          });
-          _pageController.animateToPage(
-            _currentIndex,
-            duration: const Duration(milliseconds: 500),
-            curve: Curves.ease,
-          );
+          
+            setState(() {
+              _currentIndex = index;
+              _pageController.animateToPage(
+                index,
+                duration: const Duration(milliseconds: 500),
+                curve: Curves.ease,
+              );
+            });
         },
       ),
       backgroundColor: const Color(0xFF1B1926),

@@ -14,22 +14,26 @@ class AppPage extends StatefulWidget {
 class _AppPageState extends State<AppPage> {
   int _currentIndex = 0;
   final PageController _pageController = PageController(initialPage: 0);
+  String _brokerIP = '127.0.0.1'; // Initial broker IP
   late List<Widget> pages;
-  late ChatPage chatPage;
-
-  ChatPage get getChatPage => chatPage;
 
   @override
   void initState() {
     super.initState();
-    chatPage = ChatPage(
-      key: GlobalKey<ChatPageState>(),
-    );
     pages = [
-      chatPage,
+      ChatPage(brokerIP: _brokerIP),
       const NotificationsPage(),
-      const ConnectionPage(),
+      ConnectionPage(),
     ];
+  }
+
+  void updateBrokerIP(String newBrokerIP) {
+    setState(() {
+    print(newBrokerIP);
+      _brokerIP = newBrokerIP;
+//      pages[0] = ChatPage(brokerIP: _brokerIP);
+    ChatPage.brokerIP = _brokerIP;	 
+    });
   }
 
   @override
@@ -38,25 +42,19 @@ class _AppPageState extends State<AppPage> {
       body: PageView(
         controller: _pageController,
         children: pages,
-        onPageChanged: (int index) {
-          setState(() {
-            _currentIndex = index;
-          });
-        },
+        onPageChanged: (int index) => setState(() => _currentIndex = index),
       ),
       bottomNavigationBar: BottomNavigationBarWidget(
         currentIndex: _currentIndex,
         pageController: _pageController,
-        onTabTapped: (int index) {
-          setState(() {
-            _currentIndex = index;
-          });
+        onTabTapped: (int index) => setState(() {
+          _currentIndex = index;
           _pageController.animateToPage(
-            _currentIndex,
+            index,
             duration: const Duration(milliseconds: 500),
             curve: Curves.ease,
           );
-        },
+        }),
       ),
       backgroundColor: const Color(0xFF1B1926),
     );

@@ -1,0 +1,256 @@
+5/23/24, 13:22 - Messages and calls are end-to-end encrypted. No one outside of this chat, not even WhatsApp, can read or listen to them. Tap to learn more.
+5/23/24, 13:22 - You created group "Chatnyto"
+5/23/24, 13:33 - Ink Nyto Tattoo: https://t.me/chatnyto
+
+Ce groupe whatsapp est temporaire, et sert à accueillir et répertorier les membres. La vraie discussion se passe sur telegram. Veuillez utiliser ce lien pour rejoindre le groupe officiel et obtenir plus d'informations sur le projet
+5/23/24, 13:47 - Latyr S.A joined using this group's invite link
+5/23/24, 14:12 - +221 77 503 08 63 joined using this group's invite link
+5/23/24, 14:12 - Dolor Sit Amet joined using this group's invite link
+5/23/24, 14:13 - M. Mbaye S.A joined using this group's invite link
+5/23/24, 14:16 - +221 77 013 84 56 joined using this group's invite link
+5/23/24, 14:17 - +221 77 388 29 84 joined using this group's invite link
+5/23/24, 14:18 - +221 77 784 01 61 joined using this group's invite link
+5/23/24, 14:18 - Rawane S.A joined using this group's invite link
+5/23/24, 14:18 - +221 77 387 79 32 joined using this group's invite link
+5/23/24, 14:21 - Fatou S.A joined using this group's invite link
+5/23/24, 14:21 - +226 76 81 83 27 joined using this group's invite link
+5/23/24, 14:21 - +221 78 459 92 94 joined using this group's invite link
+5/23/24, 14:22 - +221 78 421 94 85 joined using this group's invite link
+5/23/24, 14:22 - +221 77 718 32 01 joined using this group's invite link
+5/23/24, 14:23 - +221 77 836 12 12 joined using this group's invite link
+5/23/24, 14:23 - +221 77 471 61 64 joined using this group's invite link
+5/23/24, 14:23 - +221 77 060 99 72 joined using this group's invite link
+5/23/24, 14:24 - +221 77 859 03 62 joined using this group's invite link
+5/23/24, 14:25 - +221 77 410 68 88 joined using this group's invite link
+5/23/24, 14:28 - Adolphe joined using this group's invite link
+5/23/24, 14:29 - Ignace Francois joined using this group's invite link
+5/23/24, 14:30 - +221 78 156 50 39 joined using this group's invite link
+5/23/24, 14:30 - Ink Nyto Tattoo: https://t.me/chatnyto
+
+Ce groupe whatsapp est temporaire, et sert à accueillir et répertorier les membres. La vraie discussion se passe sur telegram. Veuillez utiliser ce lien pour rejoindre le groupe officiel et obtenir plus d'informations sur le projet
+5/23/24, 14:31 - +221 77 859 03 62 left
+5/23/24, 14:32 - +221 77 271 79 05 joined using this group's invite link
+5/23/24, 14:33 - +221 77 790 20 01 joined using this group's invite link
+5/23/24, 14:33 - +221 77 387 48 92 joined using this group's invite link
+5/23/24, 14:39 - +221 78 535 44 79 joined using this group's invite link
+5/23/24, 14:40 - +221 76 356 34 96 joined using this group's invite link
+5/23/24, 14:42 - +221 75 642 98 58 joined using this group's invite link
+5/23/24, 14:46 - +221 77 258 63 60 joined using this group's invite link
+5/23/24, 14:48 - +221 77 420 91 03 joined using this group's invite link
+5/23/24, 14:48 - Armando joined using this group's invite link
+5/23/24, 14:51 - +221 77 387 83 56 joined using this group's invite link
+5/23/24, 14:55 - +221 78 594 44 89 joined using this group's invite link
+5/23/24, 14:56 - +221 77 352 84 52 joined using this group's invite link
+5/23/24, 14:56 - +221 78 384 58 70 joined using this group's invite link
+5/23/24, 14:57 - Moustapha Dioum joined using this group's invite link
+5/23/24, 14:58 - +221 77 292 55 16 joined using this group's invite link
+5/23/24, 15:00 - +221 77 688 30 73 joined using this group's invite link
+5/23/24, 15:06 - +221 77 413 02 89 joined using this group's invite link
+5/23/24, 15:13 - +221 76 254 22 26 joined using this group's invite link
+5/23/24, 15:26 - +221 77 619 78 80 joined using this group's invite link
+5/23/24, 15:29 - Aissatou S.A joined using this group's invite link
+5/23/24, 15:34 - Anna Fab joined using this group's invite link
+5/23/24, 15:36 - +223 77 22 90 39 joined using this group's invite link
+5/23/24, 15:41 - +221 77 418 39 71 joined using this group's invite link
+5/23/24, 15:49 - Ink Nyto Tattoo: Chatnyto:
+https://github.com/Inknyto/chatnyto
+Ceci est le compte github du projet. Toutes les configurations ont déjà été faites. Vous pouvez le cloner, et l'explorer, en attendant que les autres membres jous rejoignent
+
+Le projet est constitué de plusieurs frontends, communicant via un seul et unique API. 
+Le protocole de communication est mqtt. MQTT (Message Queuing Telemetry Transport) est un protocole de communication utilisé en internet des objets connectés. Il est léger et rapide, donc propice pour la communication en temps réel et le Big Data. 
+
+L'architecture d'un système utilisant le protocole mqtt est l'architecture publisher/subscriber, ou pub/sub. 
+Dans une architecture pub/sub, on a trois entités princiopale:
+- le publisher, 
+- le subscriber,
+- le broker. 
+
+Le broker: Il crée des topics (sujets de conversation)
+Le subscriber: Il s'intéresse à des topics
+Le publisher: Il publie des messages sur les sujets de conversation.
+
+Dans notre cas d'utilisation, on a notre client (un des frontends), notre broker (mosquitto), notre API (REST avec python ou nodejs), ainsi que notre base de données(rabbitmq, elasticsearch ou redis). 
+Le client souscrit au topic nommé 'chat'. Il publie aussi à ce topic. 
+Le broker crée le topic 'chat', et reçoit les publications et les souscriptions. 
+L'api recoit les demandes d'authentifications, recense les clients, enregistre leurs informations personnelles ainsi que leurs messages dans la base de données. 
+La base de données conserve les informations des clients, ainsi que les messages envoyés.
+
+Dans un premier temps, j'ai fixé l'adresse du broker à 'localhost'. Ayant démarré mosquitto en local, le port 1883 est automatiquement ouvert, pour que mosquitto puisse recevoir des souscriptions et des publications. Ainsi, losque je démarre un client en local, je suis capable de m'envoyer un message a moi meme (via l'interface loopback). 
+Lorsque tout le monde aura effectué cette tache, nous pourrons passer à l'étape suivante, qui est de faire un groupe de messagerie instantannée, sans base de donnée, en passant par le réseau de broker que nous auront créés.
+5/23/24, 15:50 - Ink Nyto Tattoo: https://t.me/chatnyto
+
+Ce groupe whatsapp est temporaire, et sert à accueillir et répertorier les membres. La vraie discussion se passe sur telegram. Veuillez utiliser ce lien pour rejoindre le groupe officiel et obtenir plus d'informations sur le projet
+5/23/24, 16:03 - +221 77 184 47 65 joined using this group's invite link
+5/23/24, 16:11 - +221 77 688 08 00 joined using this group's invite link
+5/23/24, 16:12 - +221 77 704 99 28 joined using this group's invite link
+5/23/24, 16:13 - +221 77 323 77 33 joined using this group's invite link
+5/23/24, 16:25 - +221 77 163 00 44 joined using this group's invite link
+5/23/24, 16:35 - +221 77 139 05 37 joined using this group's invite link
+5/23/24, 16:38 - +33 7 61 13 27 49 joined using this group's invite link
+5/23/24, 16:40 - +229 55332568 joined using this group's invite link
+5/23/24, 16:43 - Latyr S.A: Nyto +229 bi foumou djoguer?
+5/23/24, 16:43 - Ink Nyto Tattoo: [5/23, 15:49] Ink Nyto Tattoo: Chatnyto:
+https://github.com/Inknyto/chatnyto
+Ceci est le compte github du projet. Toutes les configurations ont déjà été faites. Vous pouvez le cloner, et l'explorer, en attendant que les autres membres jous rejoignent
+
+Le projet est constitué de plusieurs frontends, communicant via un seul et unique API. 
+Le protocole de communication est mqtt. MQTT (Message Queuing Telemetry Transport) est un protocole de communication utilisé en internet des objets connectés. Il est léger et rapide, donc propice pour la communication en temps réel et le Big Data. 
+
+L'architecture d'un système utilisant le protocole mqtt est l'architecture publisher/subscriber, ou pub/sub. 
+Dans une architecture pub/sub, on a trois entités princiopale:
+- le publisher, 
+- le subscriber,
+- le broker. 
+
+Le broker: Il crée des topics (sujets de conversation)
+Le subscriber: Il s'intéresse à des topics
+Le publisher: Il publie des messages sur les sujets de conversation.
+
+Dans notre cas d'utilisation, on a notre client (un des frontends), notre broker (mosquitto), notre API (REST avec python ou nodejs), ainsi que notre base de données(rabbitmq, elasticsearch ou redis). 
+Le client souscrit au topic nommé 'chat'. Il publie aussi à ce topic. 
+Le broker crée le topic 'chat', et reçoit les publications et les souscriptions. 
+L'api recoit les demandes d'authentifications, recense les clients, enregistre leurs informations personnelles ainsi que leurs messages dans la base de données. 
+La base de données conserve les informations des clients, ainsi que les messages envoyés.
+
+Dans un premier temps, j'ai fixé l'adresse du broker à 'localhost'. Ayant démarré mosquitto en local, le port 1883 est automatiquement ouvert, pour que mosquitto puisse recevoir des souscriptions et des publications. Ainsi, losque je démarre un client en local, je suis capable de m'envoyer un message a moi meme (via l'interface loopback). 
+Lorsque tout le monde aura effectué cette tache, nous pourrons passer à l'étape suivante, qui est de faire un groupe de messagerie instantannée, sans base de donnée, en passant par le réseau de broker que nous auront créés.
+[5/23, 15:50] Ink Nyto Tattoo: https://t.me/chatnyto
+
+Ce groupe whatsapp est temporaire, et sert à accueillir et répertorier les membres. La vraie discussion se passe sur telegram. Veuillez utiliser ce lien pour rejoindre le groupe officiel et obtenir plus d'informations sur le projet
+5/23/24, 16:43 - Ink Nyto Tattoo: https://t.me/chatnyto
+
+Ce groupe whatsapp est temporaire, et sert à accueillir et répertorier les membres. La vraie discussion se passe sur telegram. Veuillez utiliser ce lien pour rejoindre le groupe officiel et obtenir plus d'informations sur le projet
+5/23/24, 16:44 - +221 76 438 13 69 joined using this group's invite link
+5/23/24, 16:48 - +221 77 408 34 93 joined using this group's invite link
+5/23/24, 17:02 - +226 61 79 59 98 joined using this group's invite link
+5/23/24, 17:05 - +221 78 519 71 22 joined using this group's invite link
+5/23/24, 17:10 - ~ ☪️Élégance pudeur 💞🧕🏾🥰 left
+5/23/24, 17:13 - +221 77 790 20 01 left
+5/23/24, 17:23 - +221 77 819 54 62 joined using this group's invite link
+5/23/24, 17:27 - +221 77 327 42 11 joined using this group's invite link
+5/23/24, 17:36 - +221 77 182 63 29 joined using this group's invite link
+5/23/24, 18:09 - +221 77 492 45 41 joined using this group's invite link
+5/23/24, 18:18 - +221 77 348 87 68 joined using this group's invite link
+5/23/24, 18:46 - +221 78 150 76 95 joined using this group's invite link
+5/23/24, 18:46 - +228 90 59 97 56 joined using this group's invite link
+5/23/24, 19:26 - +224 622 99 58 63 joined using this group's invite link
+5/23/24, 19:38 - Ink Nyto Tattoo: Chatnyto:
+https://github.com/Inknyto/chatnyto
+Ceci est le compte github du projet. Toutes les configurations ont déjà été faites. Vous pouvez le cloner, et l'explorer, en attendant que les autres membres jous rejoignent
+
+Le projet est constitué de plusieurs frontends, communicant via un seul et unique API. 
+Le protocole de communication est mqtt. MQTT (Message Queuing Telemetry Transport) est un protocole de communication utilisé en internet des objets connectés. Il est léger et rapide, donc propice pour la communication en temps réel et le Big Data. 
+
+L'architecture d'un système utilisant le protocole mqtt est l'architecture publisher/subscriber, ou pub/sub. 
+Dans une architecture pub/sub, on a trois entités princiopale:
+- le publisher, 
+- le subscriber,
+- le broker. 
+
+Le broker: Il crée des topics (sujets de conversation)
+Le subscriber: Il s'intéresse à des topics
+Le publisher: Il publie des messages sur les sujets de conversation.
+
+Dans notre cas d'utilisation, on a notre client (un des frontends), notre broker (mosquitto), notre API (REST avec python ou nodejs), ainsi que notre base de données(rabbitmq, elasticsearch ou redis). 
+Le client souscrit au topic nommé 'chat'. Il publie aussi à ce topic. 
+Le broker crée le topic 'chat', et reçoit les publications et les souscriptions. 
+L'api recoit les demandes d'authentifications, recense les clients, enregistre leurs informations personnelles ainsi que leurs messages dans la base de données. 
+La base de données conserve les informations des clients, ainsi que les messages envoyés.
+
+Dans un premier temps, j'ai fixé l'adresse du broker à 'localhost'. Ayant démarré mosquitto en local, le port 1883 est automatiquement ouvert, pour que mosquitto puisse recevoir des souscriptions et des publications. Ainsi, losque je démarre un client en local, je suis capable de m'envoyer un message a moi meme (via l'interface loopback). 
+Lorsque tout le monde aura effectué cette tache, nous pourrons passer à l'étape suivante, qui est de faire un groupe de messagerie instantannée, sans base de donnée, en passant par le réseau de broker que nous auront créés.
+5/23/24, 19:39 - Ink Nyto Tattoo: https://t.me/chatnyto
+
+Ce groupe whatsapp est temporaire, et sert à accueillir et répertorier les membres. La vraie discussion se passe sur telegram. Veuillez utiliser ce lien pour rejoindre le groupe officiel et obtenir plus d'informations sur le projet
+5/23/24, 19:57 - +221 78 464 48 21 joined using this group's invite link
+5/23/24, 20:02 - +221 78 142 16 46 joined using this group's invite link
+5/23/24, 20:02 - +221 77 648 15 96 joined using this group's invite link
+5/23/24, 20:16 - +221 77 679 37 15 joined using this group's invite link
+5/23/24, 20:20 - +221 77 800 44 18 joined using this group's invite link
+5/23/24, 21:13 - +221 77 790 87 19 joined using this group's invite link
+5/23/24, 21:17 - Fatou Thiam S.A joined using this group's invite link
+5/23/24, 22:39 - +221 77 670 78 77 joined using this group's invite link
+5/23/24, 23:37 - +221 76 945 84 88 joined using this group's invite link
+5/24/24, 12:49 - Ink Nyto Tattoo: Chatnyto:
+https://github.com/Inknyto/chatnyto
+Ceci est le compte github du projet. Toutes les configurations ont déjà été faites. Vous pouvez le cloner, et l'explorer, en attendant que les autres membres jous rejoignent
+
+Le projet est constitué de plusieurs frontends, communicant via un seul et unique API. 
+Le protocole de communication est mqtt. MQTT (Message Queuing Telemetry Transport) est un protocole de communication utilisé en internet des objets connectés. Il est léger et rapide, donc propice pour la communication en temps réel et le Big Data. 
+
+L'architecture d'un système utilisant le protocole mqtt est l'architecture publisher/subscriber, ou pub/sub. 
+Dans une architecture pub/sub, on a trois entités princiopale:
+- le publisher, 
+- le subscriber,
+- le broker. 
+
+Le broker: Il crée des topics (sujets de conversation)
+Le subscriber: Il s'intéresse à des topics
+Le publisher: Il publie des messages sur les sujets de conversation.
+
+Dans notre cas d'utilisation, on a notre client (un des frontends), notre broker (mosquitto), notre API (REST avec python ou nodejs), ainsi que notre base de données(rabbitmq, elasticsearch ou redis). 
+Le client souscrit au topic nommé 'chat'. Il publie aussi à ce topic. 
+Le broker crée le topic 'chat', et reçoit les publications et les souscriptions. 
+L'api recoit les demandes d'authentifications, recense les clients, enregistre leurs informations personnelles ainsi que leurs messages dans la base de données. 
+La base de données conserve les informations des clients, ainsi que les messages envoyés.
+
+Dans un premier temps, j'ai fixé l'adresse du broker à 'localhost'. Ayant démarré mosquitto en local, le port 1883 est automatiquement ouvert, pour que mosquitto puisse recevoir des souscriptions et des publications. Ainsi, losque je démarre un client en local, je suis capable de m'envoyer un message a moi meme (via l'interface loopback). 
+Lorsque tout le monde aura effectué cette tache, nous pourrons passer à l'étape suivante, qui est de faire un groupe de messagerie instantannée, sans base de donnée, en passant par le réseau de broker que nous auront créés.
+5/24/24, 12:49 - You added Francois ODC and +221 77 485 06 30
+5/24/24, 12:49 - Ink Nyto Tattoo: https://t.me/chatnyto
+
+Ce groupe whatsapp est temporaire, et sert à accueillir et répertorier les membres. La vraie discussion se passe sur telegram. Veuillez utiliser ce lien pour rejoindre le groupe officiel et obtenir plus d'informations sur le projet
+5/24/24, 01:46 - Francois ODC joined using this group's invite link
+5/24/24, 06:13 - +221 77 485 06 30 joined using this group's invite link
+5/24/24, 12:50 - Your security code with ~ lunarVortex changed. Tap to learn more.
+5/24/24, 12:52 - +221 77 812 26 04 joined using this group's invite link
+5/24/24, 12:58 - ~ Teranga-AI left
+5/24/24, 14:28 - +221 77 366 76 62 joined using this group's invite link
+5/24/24, 20:43 - +221 77 100 76 95 joined using this group's invite link
+5/24/24, 23:02 - Ink Nyto Tattoo: You deleted this message
+5/24/24, 23:02 - Ink Nyto Tattoo: https://t.me/chatnyto
+
+Ce groupe whatsapp est temporaire, et sert à accueillir et répertorier les membres. La vraie discussion se passe sur telegram. Veuillez utiliser ce lien pour rejoindre le groupe officiel et obtenir plus d'informations sur le projet
+5/25/24, 00:07 - +221 70 915 80 86 joined using this group's invite link
+5/25/24, 11:07 - +221 78 355 20 84 joined using this group's invite link
+5/25/24, 15:39 - +221 76 636 12 29 joined using this group's invite link
+5/25/24, 17:52 - Ink Nyto Tattoo: Ouf! On est samedi soir. La semaine a été chargée.
+J'espère que tout le monde va bien, et a passé une bonne semaine. 
+Pour expliquer chatnyto de la manière la plus simple qui soit:
+Il s'agit de discuter entre humains, puis de discuter avec les objets, et
+enfin, de discuter avec les IA.
+
+Le premier objectif nous ménera à la gratuité des messages, appels vocaux et
+vidéos au sein du meme routeur, mais cela, on en discutera plus en détail
+après avoir détaillé le plan...
+La suite sur Telegram:
+https://t.me/chatnyto
+5/25/24, 18:19 - +221 76 320 36 63 joined using this group's invite link
+5/25/24, 18:28 - Ink Nyto Tattoo: https://t.me/+ep77Fr0_OGYzNjk0
+
+Voici le groupe Telegram qui contient toutes les étapes du projet. Ces étapes seront, biensur, discutées.
+5/25/24, 18:29 - Ink Nyto Tattoo: https://t.me/+AOlj7LnbLrE1OGI0
+
+Voici le groupe Telegram pour la présentation des membres. Veuillez laisser un message écrit.
+5/25/24, 18:29 - +221 77 388 29 84: Vous avez pas créer de chaîne YouTube pour plus de clarté dans la démarche à suivre pour réaliser à notre tour le projet ?
+5/25/24, 18:30 - Ink Nyto Tattoo: https://t.me/+byrC32uz5vo5OTk0
+
+Voici le groupe Telegram pour les questions générales sur l'informatique, et le lexique. Toute question est la bienvenue
+5/25/24, 18:32 - Ink Nyto Tattoo: https://t.me/chatnyto
+
+Voici le groupe général, qui contient les discussions globales ou inclassables.
+5/25/24, 18:35 - Ink Nyto Tattoo: Une vidéo de démo complete est prévue, et une petite vidéo de présentation est dans le groupe Telegram Chatnyto:
+https://t.me/chatnyto
+Vous pouvez vous présenter, et je suis dispo pour vous guider à installer les prérequis
+5/25/24, 18:36 - +221 78 126 32 60 joined using this group's invite link
+5/25/24, 18:41 - +221 76 134 04 22 joined using this group's invite link
+5/25/24, 19:51 - Ink Nyto Tattoo: You deleted this message
+5/25/24, 20:12 - Ink Nyto Tattoo: Vous pouvez joindre le groupe général de chat sur Telegram:
+https://t.me/chatnyto_general
+5/25/24, 20:35 - Your security code with ~ Ibrahima Sylla changed. Tap to learn more.
+5/26/24, 01:44 - Dooro S.A joined using this group's invite link
+5/26/24, 06:09 - +225 09 78 68 51 joined using this group's invite link
+5/26/24, 13:11 - +221 77 913 06 75 joined using this group's invite link
+5/26/24, 16:31 - +221 77 650 87 64 joined using this group's invite link
+5/26/24, 17:52 - +226 60 41 95 24 joined using this group's invite link
+5/26/24, 18:09 - +226 60 52 41 14 joined using this group's invite link

@@ -1,5 +1,4 @@
 // chat_page/chat_page.dart
-
 import 'package:flutter/foundation.dart';
 import 'dart:convert';
 import 'package:flutter/material.dart';
@@ -7,58 +6,49 @@ import 'package:mqtt_client/mqtt_client.dart';
 import 'package:mqtt_client/mqtt_server_client.dart';
 
 class ChatPage extends StatefulWidget {
+  final Function(String) updateBrokerIP; // Function to update broker IP
+
   const ChatPage({super.key, required this.updateBrokerIP});
 
-  final Function(String) updateBrokerIP;
-
   @override
-  ChatPageState createState() => ChatPageState();
+  State<ChatPage> createState() => _ChatPageState();
 }
 
-class ChatPageState extends State<ChatPage> {
+class _ChatPageState extends State<ChatPage> {
   MqttServerClient? _mqttClient;
   final List<String> _messages = [];
   final _messageController = TextEditingController();
-  String _brokerIP = '127.0.0.1'; // Default broker IP address
+  final String _currentBrokerIP = '127.0.0.1';
 
   @override
   void initState() {
     super.initState();
-    _connectToMqttBroker(_brokerIP);
+    _mqttClient = MqttServerClient(_currentBrokerIP, 'clientId');
+    _connectToMqttBroker(_currentBrokerIP);
   }
 
-  void _connectToMqttBroker(brokerIP) {
-    // Connect to the MQTT broker
-    _mqttClient = MqttServerClient(brokerIP, 'clientId');
-
-    // Listen for the connected event
+  void _connectToMqttBroker(String brokerIP) {
     _mqttClient?.onConnected = () {
       if (kDebugMode) {
-        print('Connected to MQTT broker');
+        print('Connected to MQTT broker: $brokerIP');
       }
-
-      // Subscribe to the chat topic
       _mqttClient?.subscribe('chat', MqttQos.atMostOnce);
     };
 
-    // Listen for the disconnected event
     _mqttClient?.onDisconnected = () {
       if (kDebugMode) {
-        print('Disconnected from MQTT broker');
+        print('Disconnected from MQTT broker: $brokerIP');
       }
     };
 
-    // Connect to the broker
     _mqttClient?.connect();
 
-    // Listen for incoming messages
     _mqttClient?.updates
         ?.listen((List<MqttReceivedMessage<MqttMessage?>> event) {
       final recMess = event[0].payload;
       final pubMess = recMess as MqttPublishMessage;
       final topicName = pubMess.variableHeader?.topicName;
       final message = utf8.decode(pubMess.payload.message);
-      print(pubMess.variableHeader?.topicName);
       setState(() {
         _messages.add('Topic Name: $topicName\nMessage: $message');
       });
@@ -66,32 +56,16 @@ class ChatPageState extends State<ChatPage> {
   }
 
   void _sendMessage(String message) {
-    // Check if the client is connected
     if (_mqttClient?.connectionStatus?.state == MqttConnectionState.connected) {
-      // Publish a new message to the chat topic
       final builder = MqttClientPayloadBuilder();
       builder.addString(message);
       _mqttClient?.publishMessage('chat', MqttQos.atMostOnce, builder.payload!);
       _messageController.clear();
     } else {
-      // Handle the case when the client is not connected
       if (kDebugMode) {
         print('MQTT client is not connected.');
       }
     }
-  }
-
-  void updateBrokerIP(String newBrokerIP) {
-    print('updating broker ip...');
-    setState(() {
-      _brokerIP = newBrokerIP;
-    });
-    _reconnectToMqttBroker();
-  }
-
-  void _reconnectToMqttBroker() {
-    _mqttClient?.disconnect();
-    _connectToMqttBroker(_brokerIP);
   }
 
   @override
@@ -127,9 +101,7 @@ class ChatPageState extends State<ChatPage> {
                 ),
                 IconButton(
                   icon: const Icon(Icons.send),
-                  onPressed: () {
-                    _sendMessage(_messageController.text);
-                  },
+                  onPressed: () => _sendMessage(_messageController.text),
                 ),
               ],
             ),
@@ -143,6 +115,7 @@ class ChatPageState extends State<ChatPage> {
   void dispose() {
     _mqttClient?.unsubscribe('chat');
     _mqttClient?.disconnect();
+    _messageController.dispose(); // Dispose only the used controller
     super.dispose();
   }
 }

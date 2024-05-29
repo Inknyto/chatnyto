@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'bottom_nav_bar.dart';
-import 'notifications_page.dart';
-import 'connection_page.dart';
-import 'ChatPage/ChatPage.dart';
+import 'notifications_page/notifications_page.dart';
+import 'connection_page/connection_page.dart';
+import 'chat_page/chat_page.dart';
 
 class AppPage extends StatefulWidget {
   const AppPage({super.key});
@@ -14,44 +14,59 @@ class AppPage extends StatefulWidget {
 class _AppPageState extends State<AppPage> {
   int _currentIndex = 0;
   final PageController _pageController = PageController(initialPage: 0);
-  final List<Widget> pages = [
+  String _brokerIP = '127.0.0.1'; // Initial broker IP
 
-    const HomePage(),
-    const NotificationsPage(),
-    const SearchPage(),
-    const ConnectionPage(),
-  ];
+  late List<Widget> pages;
+
+  @override
+  void initState() {
+    super.initState();
+    pages = [
+      ChatPage(brokerIP: _brokerIP),
+      const NotificationsPage(),
+      ConnectionPage(updateBrokerIP: updateBrokerIP),
+    ];
+  }
+
+  void updateBrokerIP(String newBrokerIP) {
+    setState(() {
+      _brokerIP = newBrokerIP;
+      pages[0] = ChatPage(brokerIP: _brokerIP);
+    });
+
+    // Navigate to the ChatPage
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text("L'appli de tes rêves"),
-        backgroundColor: const Color(0xFF1B1926),
-        elevation: 0.0,
-        centerTitle: true,
-      ),
       body: PageView(
         controller: _pageController,
         children: pages,
-        onPageChanged: (int index) {
-          setState(() {
-            _currentIndex = index;
-          });
-        },
+        onPageChanged: (int index) => setState(() => _currentIndex = index),
       ),
       bottomNavigationBar: BottomNavigationBarWidget(
         currentIndex: _currentIndex,
         pageController: _pageController,
         onTabTapped: (int index) {
-          setState(() {
-            _currentIndex = index;
-          });
-          _pageController.animateToPage(
-            _currentIndex,
-            duration: const Duration(milliseconds: 500),
-            curve: Curves.ease,
-          );
+          if (index == 2) {
+            // Open the ConnectionPage when the third tab is tapped
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => ConnectionPage(updateBrokerIP: updateBrokerIP),
+              ),
+            );
+          } else {
+            setState(() {
+              _currentIndex = index;
+              _pageController.animateToPage(
+                index,
+                duration: const Duration(milliseconds: 500),
+                curve: Curves.ease,
+              );
+            });
+          }
         },
       ),
       backgroundColor: const Color(0xFF1B1926),
