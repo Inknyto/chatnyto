@@ -1,0 +1,37 @@
+const express = require('express');
+const bodyParser = require('body-parser');
+import ollama from 'ollama';
+const cors = require('cors');
+
+const app = express();
+const PORT = 3000;
+
+app.use(bodyParser.json());
+app.use(cors());
+
+app.post('/send', async (req, res) => {
+  console.log(req.body);
+  const userMessage = req.body.message;
+
+  try {
+    const messages = [{ role: 'user', content: userMessage }];
+    const response = await ollama.chat({ model: 'llama2', messages, stream: true });
+
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+
+    for await (const part of response) {
+      res.write(part.message.content);
+    }
+
+    res.end();
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'An error occurred during chatbot processing' });
+  }
+});
+
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`Server is listening on port ${PORT}`);
+});
