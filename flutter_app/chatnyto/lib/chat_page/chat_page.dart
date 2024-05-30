@@ -1,5 +1,6 @@
 // chat_page/chat_page.dart
 
+import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'dart:convert';
 import 'package:flutter/material.dart';
@@ -26,8 +27,10 @@ class _ChatPageState extends State<ChatPage> {
     _connectToMqttBroker(widget.brokerIP);
   }
 
-  void _connectToMqttBroker(String brokerIP) {
-    _mqttClient = MqttServerClient(brokerIP, 'clientId');
+  void _connectToMqttBroker(String brokerIP) async {
+    String deviceIp = await _getDeviceIPAddress();
+    print('device ip to be set ad client id: $deviceIp');
+    _mqttClient = MqttServerClient(brokerIP, deviceIp);
     _mqttClient?.onConnected = () {
       if (kDebugMode) {
         print('Connected to MQTT broker: ${widget.brokerIP}');
@@ -53,12 +56,39 @@ class _ChatPageState extends State<ChatPage> {
     });
   }
 
-void updateBrokerIP(String newBrokerIP) {
-  _mqttClient?.unsubscribe('chat');
-  _mqttClient?.disconnect();
-  _mqttClient = null;
-  _connectToMqttBroker(newBrokerIP);
+  void updateBrokerIP(String newBrokerIP) {
+    _mqttClient?.unsubscribe('chat');
+    _mqttClient?.disconnect();
+    _mqttClient = null;
+    _connectToMqttBroker(newBrokerIP);
+  }
+
+Future<String> _getDeviceIPAddress() async {
+  String ipAddress = '';
+  List<NetworkInterface> interfaces = await printIps();
+  for (var interface in interfaces) {
+    print('== Interface: ${interface.name} ==');
+    for (var addr in interface.addresses) {
+      print(
+          'one line: ${addr.address} ${addr.host} ${addr.isLoopback} ${addr.rawAddress} ${addr.type.name} :one line');
+      if (addr.type == InternetAddressType.IPv4 && !addr.isLoopback) {
+        ipAddress = addr.address;
+        break;
+      }
+    }
+    if (ipAddress.isNotEmpty) break;
+  }
+  print("ip from function return: $ipAddress");
+  return ipAddress;
 }
+
+  Future<List<NetworkInterface>> printIps() async {
+    List<NetworkInterface> interfaces = [];
+    for (var interface in await NetworkInterface.list()) {
+      interfaces.add(interface);
+    }
+    return interfaces;
+  }
 
   void _sendMessage(String message) {
     print("message to be sent: $message");
