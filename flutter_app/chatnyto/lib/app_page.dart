@@ -16,6 +16,7 @@ class _AppPageState extends State<AppPage> {
   int _currentIndex = 0;
   final PageController _pageController = PageController(initialPage: 0);
   String _brokerIP = '127.0.0.1'; // Initial broker IP
+  String _topicName = 'chat'; // Initial broker IP
 
   late List<Widget> pages;
 
@@ -23,22 +24,50 @@ class _AppPageState extends State<AppPage> {
   void initState() {
     super.initState();
     pages = [
-      ChatPage(brokerIP: _brokerIP),
+      ChatPage(
+        brokerIP: _brokerIP,
+        topicName: _topicName,
+      ),
       const NotificationsPage(),
       ConnectionPage(
         updateBrokerIP: updateBrokerIP,
+        updateTopicName: updateTopicName,
         brokerIP: _brokerIP,
+        topicName: _topicName,
       ),
-      ChatBotPage(),
+      const ChatBotPage(),
     ];
+  }
+
+  void updateTopicName(String newTopicName) {
+    setState(() {
+      _topicName = newTopicName;
+      pages[0] = ChatPage(
+        brokerIP: _brokerIP,
+        topicName: _topicName,
+      );
+      pages[2] = ConnectionPage(
+        updateBrokerIP: updateBrokerIP,
+        brokerIP: _brokerIP,
+        updateTopicName: updateTopicName,
+        topicName: _topicName,
+      );
+    });
   }
 
   void updateBrokerIP(String newBrokerIP) {
     setState(() {
       _brokerIP = newBrokerIP;
-      pages[0] = ChatPage(brokerIP: _brokerIP);
-      pages[2] =
-          ConnectionPage(updateBrokerIP: updateBrokerIP, brokerIP: _brokerIP);
+      pages[0] = ChatPage(
+        brokerIP: _brokerIP,
+        topicName: _topicName,
+      );
+      pages[2] = ConnectionPage(
+        updateBrokerIP: updateBrokerIP,
+        brokerIP: _brokerIP,
+        updateTopicName: updateTopicName,
+        topicName: _topicName,
+      );
     });
   }
 
