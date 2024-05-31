@@ -3,11 +3,17 @@ import 'package:flutter/material.dart';
 
 class ConnectionPage extends StatefulWidget {
   final Function(String) updateBrokerIP;
+  final Function(String) updateTopicName;
 
   final String brokerIP;
+  final String topicName;
 
   const ConnectionPage(
-      {super.key, required this.updateBrokerIP, required this.brokerIP});
+      {super.key,
+      required this.updateTopicName,
+      required this.topicName,
+      required this.updateBrokerIP,
+      required this.brokerIP});
 
   @override
   State<ConnectionPage> createState() => _ConnectionPageState();
@@ -15,16 +21,19 @@ class ConnectionPage extends StatefulWidget {
 
 class _ConnectionPageState extends State<ConnectionPage> {
   late TextEditingController _brokerIPController;
+  late TextEditingController _topicNameController;
 
   @override
   void initState() {
     super.initState();
     _brokerIPController = TextEditingController(text: widget.brokerIP);
+    _topicNameController = TextEditingController(text: widget.topicName);
   }
 
   @override
   void dispose() {
     _brokerIPController.dispose();
+    _topicNameController.dispose();
     super.dispose();
   }
 
@@ -51,6 +60,20 @@ class _ConnectionPageState extends State<ConnectionPage> {
                 widget.updateBrokerIP(newBrokerIP);
               },
               child: const Text('Update Broker IP'),
+            ),
+            TextField(
+              controller: _topicNameController,
+              decoration: const InputDecoration(
+                labelText: 'Topic Name',
+              ),
+            ),
+            const SizedBox(height: 16.0),
+            ElevatedButton(
+              onPressed: () {
+                final newTopicName = _topicNameController.text;
+                widget.updateTopicName(newTopicName);
+              },
+              child: const Text('Update Topic Name'),
             ),
           ],
         ),

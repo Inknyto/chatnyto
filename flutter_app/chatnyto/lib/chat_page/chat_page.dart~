@@ -8,9 +8,10 @@ import 'package:mqtt_client/mqtt_client.dart';
 import 'package:mqtt_client/mqtt_server_client.dart';
 
 class ChatPage extends StatefulWidget {
-  const ChatPage({super.key, required this.brokerIP});
+  const ChatPage({super.key, required this.brokerIP, required this.topicName});
 
   final String brokerIP;
+  final String topicName;
 
   @override
   State<ChatPage> createState() => _ChatPageState();
@@ -21,22 +22,25 @@ class _ChatPageState extends State<ChatPage> {
   final List<String> _messages = [];
   final _messageController = TextEditingController();
   bool _isConnected = false; // Add a flag to track the connection status
+  String _deviceIp = '';
 
   @override
   void initState() {
     super.initState();
-    _connectToMqttBroker(widget.brokerIP);
+    _connectToMqttBroker(widget.brokerIP, widget.topicName);
   }
 
-  void _connectToMqttBroker(String brokerIP) async {
+  void _connectToMqttBroker(String brokerIP, String topicName) async {
     String deviceIp = await _getDeviceIPAddress();
-    print('device ip to be set ad client id: $deviceIp');
+    if (kDebugMode) {
+      print('device ip to be set ad client id: $deviceIp');
+    }
     _mqttClient = MqttServerClient(brokerIP, deviceIp);
     _mqttClient?.onConnected = () {
       if (kDebugMode) {
         print('Connected to MQTT broker: ${widget.brokerIP}');
       }
-      _mqttClient?.subscribe('chat', MqttQos.atMostOnce);
+      _mqttClient?.subscribe(topicName, MqttQos.atMostOnce);
       setState(() {
         _isConnected = true; // Update the connection status
       });
@@ -50,7 +54,9 @@ class _ChatPageState extends State<ChatPage> {
       });
     };
     _mqttClient?.connect(widget.brokerIP);
-    print(widget.brokerIP);
+    if (kDebugMode) {
+      print(widget.brokerIP);
+    }
     _mqttClient?.updates
         ?.listen((List<MqttReceivedMessage<MqttMessage?>> event) {
       final recMess = event[0].payload;
@@ -58,26 +64,30 @@ class _ChatPageState extends State<ChatPage> {
       final topicName = pubMess.variableHeader?.topicName;
       final message = utf8.decode(pubMess.payload.message);
       setState(() {
-        _messages.add('Topic Name: $topicName\nMessage: $message');
+        _messages.add('$_deviceIp ~> $topicName\n$message');
       });
     });
   }
 
-  void updateBrokerIP(String newBrokerIP) {
-    _mqttClient?.unsubscribe('chat');
+  void updateBrokerIP(String newTopicName, String newBrokerIP) {
+    _mqttClient?.unsubscribe(newTopicName);
     _mqttClient?.disconnect();
     _mqttClient = null;
-    _connectToMqttBroker(newBrokerIP);
+    _connectToMqttBroker(newBrokerIP, newTopicName);
   }
 
   Future<String> _getDeviceIPAddress() async {
     String ipAddress = '';
     List<NetworkInterface> interfaces = await printIps();
     for (var interface in interfaces) {
-      print('== Interface: ${interface.name} ==');
+      if (kDebugMode) {
+        print('== Interface: ${interface.name} ==');
+      }
       for (var addr in interface.addresses) {
-        print(
-            'one line: ${addr.address} ${addr.host} ${addr.isLoopback} ${addr.rawAddress} ${addr.type.name} :one line');
+        if (kDebugMode) {
+          print(
+              'one line: ${addr.address} ${addr.host} ${addr.isLoopback} ${addr.rawAddress} ${addr.type.name} :one line');
+        }
         if (addr.type == InternetAddressType.IPv4 && !addr.isLoopback) {
           ipAddress = addr.address;
           break;
@@ -85,10 +95,16 @@ class _ChatPageState extends State<ChatPage> {
       }
     }
     if (ipAddress.isEmpty) {
-      // i can use ipAdress = 'Not Connected';
+      // i can use ipAddress = 'Not Connected';
       ipAddress = '127.0.0.1';
     }
-    print("ip from function return: $ipAddress");
+    if (kDebugMode) {
+      print("ip from function return: $ipAddress");
+    }
+    setState(() {
+      _deviceIp = ipAddress;
+    });
+
     return ipAddress;
   }
 
@@ -101,12 +117,14 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   void _sendMessage(String message) {
-    print("message to be sent: $message");
-    print(widget.brokerIP);
+    if (kDebugMode) {
+      print("message to be sent: $message");
+    }
     if (_isConnected) {
       final builder = MqttClientPayloadBuilder();
       builder.addString(message);
-      _mqttClient?.publishMessage('chat', MqttQos.atMostOnce, builder.payload!);
+      _mqttClient?.publishMessage(
+          widget.topicName, MqttQos.atMostOnce, builder.payload!);
       _messageController.clear();
     } else {
       if (kDebugMode) {
@@ -134,14 +152,16 @@ class _ChatPageState extends State<ChatPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Chatnyto'),
+        title: Text(
+          _isConnected
+              ? 'Chatnyto, $_deviceIp		🟢Online'
+              : 'Chatnyto, $_deviceIp		🔴Offline',
+          style: const TextStyle(color: Colors.black),
+        ), // Show the connection status
+        //Text('Chatnyto, $_deviceIp'),
       ),
       body: Column(
         children: [
-          Text(
-            _isConnected ? 'Online' : 'Offline',
-            style: const TextStyle(color: Colors.black),
-          ), // Show the connection status
           Expanded(
             child: ListView.builder(
               itemCount: _messages.length,
@@ -179,7 +199,7 @@ class _ChatPageState extends State<ChatPage> {
 
   @override
   void dispose() {
-    _mqttClient?.unsubscribe('chat');
+    _mqttClient?.unsubscribe(widget.topicName);
     _mqttClient?.disconnect();
     _messageController.dispose();
     super.dispose();

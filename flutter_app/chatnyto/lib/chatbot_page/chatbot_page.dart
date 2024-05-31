@@ -1,10 +1,13 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
 class ChatBotPage extends StatefulWidget {
+  const ChatBotPage({super.key});
+
   @override
-  _ChatBotPageState createState() => _ChatBotPageState();
+  State<ChatBotPage> createState() => _ChatBotPageState();
 }
 
 class _ChatBotPageState extends State<ChatBotPage> {
@@ -36,7 +39,9 @@ class _ChatBotPageState extends State<ChatBotPage> {
         setState(() {});
       }
     } catch (e) {
-      print('Error: $e');
+      if (kDebugMode) {
+        print('Error: $e');
+      }
     }
   }
 
