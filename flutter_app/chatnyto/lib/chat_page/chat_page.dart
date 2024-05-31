@@ -20,6 +20,7 @@ class _ChatPageState extends State<ChatPage> {
   MqttServerClient? _mqttClient;
   final List<String> _messages = [];
   final _messageController = TextEditingController();
+  bool _isConnected = false; // Add a flag to track the connection status
 
   @override
   void initState() {
@@ -36,11 +37,17 @@ class _ChatPageState extends State<ChatPage> {
         print('Connected to MQTT broker: ${widget.brokerIP}');
       }
       _mqttClient?.subscribe('chat', MqttQos.atMostOnce);
+      setState(() {
+        _isConnected = true; // Update the connection status
+      });
     };
     _mqttClient?.onDisconnected = () {
       if (kDebugMode) {
         print('Disconnected from MQTT broker: ${widget.brokerIP}');
       }
+      setState(() {
+        _isConnected = false; // Update the connection status
+      });
     };
     _mqttClient?.connect(widget.brokerIP);
     print(widget.brokerIP);
@@ -63,24 +70,27 @@ class _ChatPageState extends State<ChatPage> {
     _connectToMqttBroker(newBrokerIP);
   }
 
-Future<String> _getDeviceIPAddress() async {
-  String ipAddress = '';
-  List<NetworkInterface> interfaces = await printIps();
-  for (var interface in interfaces) {
-    print('== Interface: ${interface.name} ==');
-    for (var addr in interface.addresses) {
-      print(
-          'one line: ${addr.address} ${addr.host} ${addr.isLoopback} ${addr.rawAddress} ${addr.type.name} :one line');
-      if (addr.type == InternetAddressType.IPv4 && !addr.isLoopback) {
-        ipAddress = addr.address;
-        break;
+  Future<String> _getDeviceIPAddress() async {
+    String ipAddress = '';
+    List<NetworkInterface> interfaces = await printIps();
+    for (var interface in interfaces) {
+      print('== Interface: ${interface.name} ==');
+      for (var addr in interface.addresses) {
+        print(
+            'one line: ${addr.address} ${addr.host} ${addr.isLoopback} ${addr.rawAddress} ${addr.type.name} :one line');
+        if (addr.type == InternetAddressType.IPv4 && !addr.isLoopback) {
+          ipAddress = addr.address;
+          break;
+        }
       }
     }
-    if (ipAddress.isNotEmpty) break;
+    if (ipAddress.isEmpty) {
+      // i can use ipAdress = 'Not Connected';
+      ipAddress = '127.0.0.1';
+    }
+    print("ip from function return: $ipAddress");
+    return ipAddress;
   }
-  print("ip from function return: $ipAddress");
-  return ipAddress;
-}
 
   Future<List<NetworkInterface>> printIps() async {
     List<NetworkInterface> interfaces = [];
@@ -93,7 +103,7 @@ Future<String> _getDeviceIPAddress() async {
   void _sendMessage(String message) {
     print("message to be sent: $message");
     print(widget.brokerIP);
-    if (_mqttClient?.connectionStatus?.state == MqttConnectionState.connected) {
+    if (_isConnected) {
       final builder = MqttClientPayloadBuilder();
       builder.addString(message);
       _mqttClient?.publishMessage('chat', MqttQos.atMostOnce, builder.payload!);
@@ -102,6 +112,21 @@ Future<String> _getDeviceIPAddress() async {
       if (kDebugMode) {
         print('MQTT client is not connected.');
       }
+      showDialog(
+        context: context,
+        builder: (BuildContext context) {
+          return AlertDialog(
+            title: const Text('Not Connected'),
+            content: const Text('You are not connected to the MQTT broker.'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('OK'),
+              ),
+            ],
+          );
+        },
+      );
     }
   }
 
@@ -113,6 +138,10 @@ Future<String> _getDeviceIPAddress() async {
       ),
       body: Column(
         children: [
+          Text(
+            _isConnected ? '🟢Online' : '🔴Offline',
+            style: const TextStyle(color: Colors.black),
+          ), // Show the connection status
           Expanded(
             child: ListView.builder(
               itemCount: _messages.length,
