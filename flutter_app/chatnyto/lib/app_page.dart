@@ -16,6 +16,7 @@ class _AppPageState extends State<AppPage> {
   int _currentIndex = 0;
   final PageController _pageController = PageController(initialPage: 0);
   String _brokerIP = '127.0.0.1'; // Initial broker IP
+  String _deviceIP = '127.0.0.1'; // Initial broker IP
   String _topicName = 'chat'; // Initial broker IP
 
   late List<Widget> pages;
@@ -27,6 +28,7 @@ class _AppPageState extends State<AppPage> {
       ChatPage(
         brokerIP: _brokerIP,
         topicName: _topicName,
+        deviceIP: _deviceIP,
       ),
       const NotificationsPage(),
       ConnectionPage(
@@ -45,6 +47,7 @@ class _AppPageState extends State<AppPage> {
       pages[0] = ChatPage(
         brokerIP: _brokerIP,
         topicName: _topicName,
+        deviceIP: _deviceIP,
       );
       pages[2] = ConnectionPage(
         updateBrokerIP: updateBrokerIP,
@@ -61,6 +64,7 @@ class _AppPageState extends State<AppPage> {
       pages[0] = ChatPage(
         brokerIP: _brokerIP,
         topicName: _topicName,
+        deviceIP: _deviceIP,
       );
       pages[2] = ConnectionPage(
         updateBrokerIP: updateBrokerIP,
