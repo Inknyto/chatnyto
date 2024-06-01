@@ -8,10 +8,15 @@ import 'package:mqtt_client/mqtt_client.dart';
 import 'package:mqtt_client/mqtt_server_client.dart';
 
 class ChatPage extends StatefulWidget {
-  const ChatPage({super.key, required this.brokerIP, required this.topicName});
+  const ChatPage(
+      {super.key,
+      required this.deviceIP,
+      required this.brokerIP,
+      required this.topicName});
 
   final String brokerIP;
   final String topicName;
+  final String deviceIP;
 
   @override
   State<ChatPage> createState() => _ChatPageState();
@@ -60,16 +65,22 @@ class _ChatPageState extends State<ChatPage> {
     _mqttClient?.updates
         ?.listen((List<MqttReceivedMessage<MqttMessage?>> event) {
       final recMess = event[0].payload;
+
       final pubMess = recMess as MqttPublishMessage;
+      print("pubMess: $pubMess");
       final topicName = pubMess.variableHeader?.topicName;
+
+      // final senderIP = utf8.decode(pubMess.payload.message);
       final message = utf8.decode(pubMess.payload.message);
+
       setState(() {
-        _messages.add('$_deviceIp ~> $topicName\n$message');
+        _messages.add('$topicName\n$message');
       });
     });
   }
 
   void updateBrokerIP(String newTopicName, String newBrokerIP) {
+    // if it works, do not touch it
     _mqttClient?.unsubscribe(newTopicName);
     _mqttClient?.disconnect();
     _mqttClient = null;
@@ -122,7 +133,7 @@ class _ChatPageState extends State<ChatPage> {
     }
     if (_isConnected) {
       final builder = MqttClientPayloadBuilder();
-      builder.addString(message);
+      builder.addString("$_deviceIp ~> $message");
       _mqttClient?.publishMessage(
           widget.topicName, MqttQos.atMostOnce, builder.payload!);
       _messageController.clear();
