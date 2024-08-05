@@ -1,0 +1,18 @@
+AIs.txt
+ai: your ai
+	other people's ai (repondeur)
+	parameters
+	craft (prompt, customize ai)
+
+1st page:
+    Most recent Ai chat,
+    or pinned Ai chat
+
+2nd page:
+    Group chats,
+
+3rd page:
+    Heatmap (of people's position) or newsfeed
+
+4th page:
+    Parameters

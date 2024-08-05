@@ -1,0 +1,22 @@
+put a sidebar in the scaffold
+set the three categories (humans, robots, ai) + the account management
+as sidebar's content 
+
+add four pages for each entity:
+
+	humans: single person(latest or saved chat(favourite) ),
+ 		group chat,
+		parameters
+		explore (heatmap, newsfeed)
+		
+	robots: single robot,
+		group of robots
+		parameters
+		learn (make, connect)
+
+	ai: 	single ai
+		other people's ai (repondeur)
+		parameters
+		craft (prompt, customize ai)
+
+Then, make everything work remotely

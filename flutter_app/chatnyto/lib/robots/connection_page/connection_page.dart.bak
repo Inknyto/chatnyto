@@ -1,0 +1,47 @@
+import 'package:flutter/material.dart';
+import '../ChatPage/ChatPage.dart';
+
+class ConnectionPage extends StatefulWidget {
+  const ConnectionPage({super.key});
+
+  @override
+  State<ConnectionPage> createState() => _ConnectionPageState();
+}
+
+class _ConnectionPageState extends State<ConnectionPage> {
+  final _brokerIPController = TextEditingController(text: '127.0.0.1');
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Broker IP Address'),
+      ),
+      body: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          children: [
+            TextField(
+              controller: _brokerIPController,
+              decoration: const InputDecoration(
+                labelText: 'Broker IP Address',
+              ),
+            ),
+            const SizedBox(height: 16.0),
+            ElevatedButton(
+              onPressed: () {
+                // Update the broker IP address
+                final newBrokerIP = _brokerIPController.text;
+                // Use the newBrokerIP value to update the MQTT client in the ChatPage
+                if (newBrokerIP.isNotEmpty) {
+                  ChatPage.updateBrokerIP(newBrokerIP);
+                }
+              },
+              child: const Text('Update Broker IP'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}

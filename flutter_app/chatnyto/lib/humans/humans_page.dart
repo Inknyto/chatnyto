@@ -1,18 +1,19 @@
 import 'package:flutter/material.dart';
 import 'bottom_nav_bar.dart';
 import 'notifications_page/notifications_page.dart';
-import 'connection_page/connection_page.dart';
+import 'settings_page/settings_page.dart';
+import 'connections_page/connections_page.dart';
 import 'chat_page/chat_page.dart';
-import 'chatbot_page/chatbot_page.dart';
+import 'heat_map_page/heat_map_page.dart';
 
-class AppPage extends StatefulWidget {
-  const AppPage({super.key});
+class HumansPage extends StatefulWidget {
+  const HumansPage({super.key});
 
   @override
-  State<AppPage> createState() => _AppPageState();
+  State<HumansPage> createState() => _HumansPageState();
 }
 
-class _AppPageState extends State<AppPage> {
+class _HumansPageState extends State<HumansPage> {
   int _currentIndex = 0;
   final PageController _pageController = PageController(initialPage: 0);
   String _brokerIP = '127.0.0.1'; // Initial broker IP
@@ -30,50 +31,13 @@ class _AppPageState extends State<AppPage> {
         topicName: _topicName,
         deviceIP: _deviceIP,
       ),
-      const NotificationsPage(),
-      ConnectionPage(
-        updateBrokerIP: updateBrokerIP,
-        updateTopicName: updateTopicName,
-        brokerIP: _brokerIP,
-        topicName: _topicName,
-      ),
-      const ChatBotPage(),
+      // const NotificationsPage(),
+      const ConnectionsPage(),
+      const HeatMapPage(),
+      SettingsPage(),
     ];
   }
 
-  void updateTopicName(String newTopicName) {
-    setState(() {
-      _topicName = newTopicName;
-      pages[0] = ChatPage(
-        brokerIP: _brokerIP,
-        topicName: _topicName,
-        deviceIP: _deviceIP,
-      );
-      pages[2] = ConnectionPage(
-        updateBrokerIP: updateBrokerIP,
-        brokerIP: _brokerIP,
-        updateTopicName: updateTopicName,
-        topicName: _topicName,
-      );
-    });
-  }
-
-  void updateBrokerIP(String newBrokerIP) {
-    setState(() {
-      _brokerIP = newBrokerIP;
-      pages[0] = ChatPage(
-        brokerIP: _brokerIP,
-        topicName: _topicName,
-        deviceIP: _deviceIP,
-      );
-      pages[2] = ConnectionPage(
-        updateBrokerIP: updateBrokerIP,
-        brokerIP: _brokerIP,
-        updateTopicName: updateTopicName,
-        topicName: _topicName,
-      );
-    });
-  }
 
   @override
   Widget build(BuildContext context) {
