@@ -1,0 +1,18 @@
+Robots.txt
+
+robots: single robot,
+	group of robots
+	parameters
+	learn (make, connect)
+
+1st page:
+    Available Robots status
+
+2nd page:
+    COnfiguration helpers
+
+3rd page:
+    Heatmap (of robots position)
+
+4th page:
+    Parameters

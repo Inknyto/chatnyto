@@ -12,9 +12,9 @@ class MqttService {
     required String brokerIP,
     required String topicName,
     required String deviceIP,
-    required Function onConnected,
-    required Function onDisconnected,
-    required Function(ChatMessage) onMessageReceived,
+    required void Function() onConnected,
+    required void Function() onDisconnected,
+    required void Function(ChatMessage) onMessageReceived,
   }) async {
     _client = MqttServerClient(brokerIP, deviceIP);
     _topicName = topicName;

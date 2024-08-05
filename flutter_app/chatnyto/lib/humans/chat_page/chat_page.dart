@@ -57,6 +57,10 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   void _onMessageReceived(ChatMessage message) {
+          setState(() {
+          _messages.add(message);
+        });
+
     _messageStorage.saveMessages(_messages, widget.brokerIP, widget.topicName);
   }
 
@@ -66,9 +70,10 @@ class _ChatPageState extends State<ChatPage> {
       if (delta.isNotEmpty) {
         final message = ChatMessage(sender: _deviceIp, delta: delta);
         _mqttService.sendMessage(message);
-        setState(() {
-          _messages.add(message);
-        });
+// bad idea, since this adds the message on send, and not on recieve
+//        setState(() {
+//          _messages.add(message);
+//        });
         _messageStorage.saveMessages(_messages, widget.brokerIP, widget.topicName);
         _messageController.clear();
       }
@@ -100,17 +105,11 @@ class _ChatPageState extends State<ChatPage> {
     return Scaffold(
       appBar: AppBar(
         title: Text(_isConnected ? 'Chatnyto, $_deviceIp 🟢Online' : 'Chatnyto, $_deviceIp 🔴Offline'),
-        actions: [
-          IconButton(
-            icon: Icon(_showToolbar ? Icons.arrow_drop_up_sharp : Icons.arrow_drop_down_sharp),
-            onPressed: () => setState(() => _showToolbar = !_showToolbar),
-          ),
-        ],
       ),
       body: Column(
         children: [
-          if (_showToolbar) _buildToolbar(),
           Expanded(child: _buildMessageList()),
+          if (_showToolbar) _buildToolbar(),
           _buildMessageInput(),
         ],
       ),
@@ -160,6 +159,12 @@ class _ChatPageState extends State<ChatPage> {
       padding: const EdgeInsets.all(8.0),
       child: Row(
         children: [
+        
+          IconButton(
+            icon: Icon(_showToolbar ? Icons.arrow_drop_up_sharp : Icons.arrow_drop_down_sharp),
+            onPressed: () => setState(() => _showToolbar = !_showToolbar),
+          ),
+       
           Expanded(
             child: Container(
               decoration: BoxDecoration(

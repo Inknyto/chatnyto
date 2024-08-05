@@ -1,0 +1,69 @@
+import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'note_editor.dart';
+
+class NotesList extends StatefulWidget {
+  const NotesList({super.key});
+
+  @override
+  State<NotesList> createState() => _NotesListState();
+}
+
+class _NotesListState extends State<NotesList> {
+  List<String> notes = [];
+
+  @override
+  void initState() {
+    super.initState();
+    loadNotes();
+  }
+
+  Future<void> loadNotes() async {
+    final prefs = await SharedPreferences.getInstance();
+    final notesList = prefs.getStringList('notes') ?? [];
+    setState(() {
+      notes = notesList;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView.builder(
+      itemCount: notes.length,
+      itemBuilder: (context, index) {
+        return Dismissible(
+          key: Key(notes[index]),
+          direction: DismissDirection.endToStart,
+          onDismissed: (direction) async {
+            final prefs = await SharedPreferences.getInstance();
+            notes.removeAt(index);
+            await prefs.setStringList('notes', notes);
+            setState(() {});
+          },
+          background: Container(
+            color: Colors.red,
+            alignment: Alignment.centerRight,
+            padding: const EdgeInsets.only(right: 16.0),
+            child: const Icon(Icons.delete, color: Colors.white),
+          ),
+          child: ListTile(
+            title: Text(notes[index]),
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => NoteEditor(
+                    initialNote: notes[index],
+                    notes: notes,
+                    index: index,
+                    reloadNotes: loadNotes,
+                  ),
+                ),
+              );
+            },
+          ),
+        );
+      },
+    );
+  }
+}

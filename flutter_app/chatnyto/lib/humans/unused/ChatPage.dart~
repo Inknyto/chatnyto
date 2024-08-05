@@ -1,0 +1,281 @@
+import 'package:flutter/foundation.dart';
+import 'dart:convert';
+import 'package:flutter/material.dart';
+import 'package:mqtt_client/mqtt_client.dart';
+import 'package:mqtt_client/mqtt_server_client.dart';
+
+
+class ChatPage extends StatefulWidget {
+  const ChatPage({super.key});
+
+  @override
+  ChatPageState createState() => ChatPageState();
+}
+
+
+
+
+class ChatPageState extends State<ChatPage> {
+  MqttServerClient? _mqttClient;
+  final List<String> _messages = [];
+  final _messageController = TextEditingController();
+  String _brokerIP = '127.0.0.1'; // Default broker IP address
+
+  @override
+  void initState() {
+    super.initState();
+    _connectToMqttBroker(_brokerIP);
+  }
+
+  void _connectToMqttBroker(_brokerIP) {
+    // Connect to the MQTT broker
+    _mqttClient = MqttServerClient(_brokerIP, 'clientId');
+
+    // Listen for the connected event
+    _mqttClient?.onConnected = () {
+      if (kDebugMode) {
+        print('Connected to MQTT broker');
+      }
+      // Subscribe to the chat topic
+      _mqttClient?.subscribe('chat', MqttQos.atMostOnce);
+    };
+
+    // Listen for the disconnected event
+    _mqttClient?.onDisconnected = () {
+      if (kDebugMode) {
+        print('Disconnected from MQTT broker');
+      }
+    };
+
+    // Connect to the broker
+    _mqttClient?.connect();
+
+    // Listen for incoming messages
+    _mqttClient?.updates
+        ?.listen((List<MqttReceivedMessage<MqttMessage?>> event) {
+      final recMess = event[0].payload;
+      final pubMess = recMess as MqttPublishMessage;
+      final topicName = pubMess.variableHeader?.topicName;
+      final message = utf8.decode(pubMess.payload.message);
+
+      print(pubMess.variableHeader?.topicName);
+      setState(() {
+        _messages.add('Topic Name: $topicName\nMessage: $message');
+      });
+    });
+  }
+
+  void _sendMessage(String message) {
+    // Check if the client is connected
+    if (_mqttClient?.connectionStatus?.state == MqttConnectionState.connected) {
+      // Publish a new message to the chat topic
+      final builder = MqttClientPayloadBuilder();
+      builder.addString(message);
+      _mqttClient?.publishMessage('chat', MqttQos.atMostOnce, builder.payload!);
+      _messageController.clear();
+    } else {
+      // Handle the case when the client is not connected
+      if (kDebugMode) {
+        print('MQTT client is not connected.');
+      }
+    }
+  }
+
+  void updateBrokerIP(String newBrokerIP) {
+  print('updating broker ip...');
+    setState(() {
+      _brokerIP = newBrokerIP;
+    });
+    _reconnectToMqttBroker();
+  }
+
+  void _reconnectToMqttBroker() {
+    _mqttClient?.disconnect();
+    _connectToMqttBroker(_brokerIP);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('MQTT Chat App'),
+      ),
+      body: Column(
+        children: [
+          Expanded(
+            child: ListView.builder(
+              itemCount: _messages.length,
+              itemBuilder: (context, index) {
+                return ListTile(
+                  title: Text(_messages[index]),
+                );
+              },
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(8.0),
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _messageController,
+                    decoration: const InputDecoration(
+                      hintText: 'Type a message...',
+                    ),
+                    onSubmitted: _sendMessage,
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.send),
+                  onPressed: () {
+                    _sendMessage(_messageController.text);
+                  },
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    _mqttClient?.unsubscribe('chat');
+    _mqttClient?.disconnect();
+    super.dispose();
+  }
+}
+
+
+
+// class ChatPageState extends State<ChatPage> {
+//   MqttServerClient? _mqttClient;
+//   final List<String> _messages = [];
+//   final _messageController = TextEditingController();
+//   String _brokerIP = '127.0.0.1'; // Default broker IP address
+// 
+//   @override
+//   void initState() {
+//     super.initState();
+//     _connectToMqttBroker();
+//   }
+// 
+//   void _connectToMqttBroker() {
+//     // Connect to the MQTT broker
+//     _mqttClient = MqttServerClient(_brokerIP, 'clientId');
+// 
+//     // Listen for the connected event
+//     _mqttClient?.onConnected = () {
+//       if (kDebugMode) {
+//         print('Connected to MQTT broker');
+//       }
+// 
+//       // Subscribe to the chat topic
+//       _mqttClient?.subscribe('chat', MqttQos.atMostOnce);
+//     };
+// 
+//     // Listen for the disconnected event
+//     _mqttClient?.onDisconnected = () {
+//       if (kDebugMode) {
+//         print('Disconnected from MQTT broker');
+//       }
+//     };
+// 
+//     // Connect to the broker
+//     _mqttClient?.connect();
+// 
+//     // Listen for incoming messages
+//     _mqttClient?.updates
+//         ?.listen((List<MqttReceivedMessage<MqttMessage?>> event) {
+//       final recMess = event[0].payload;
+//       final pubMess = recMess as MqttPublishMessage;
+//       final topicName = pubMess.variableHeader?.topicName;
+//       final message = utf8.decode(pubMess.payload.message);
+//       print(pubMess.variableHeader?.topicName);
+//       setState(() {
+//         _messages.add('Topic Name: $topicName\nMessage: $message');
+//       });
+//     });
+//   }
+// 
+//   void _sendMessage(String message) {
+//     // Check if the client is connected
+//     if (_mqttClient?.connectionStatus?.state == MqttConnectionState.connected) {
+//       // Publish a new message to the chat topic
+//       final builder = MqttClientPayloadBuilder();
+//       builder.addString(message);
+//       _mqttClient?.publishMessage('chat', MqttQos.atMostOnce, builder.payload!);
+//       _messageController.clear();
+//     } else {
+//       // Handle the case when the client is not connected
+//       if (kDebugMode) {
+//         print('MQTT client is not connected.');
+//       }
+//     }
+//   }
+// 
+//   void updateBrokerIP(String newBrokerIP) {
+//     setState(() {
+//       _brokerIP = newBrokerIP;
+//     });
+//     _reconnectToMqttBroker();
+//   }
+// 
+//   void _reconnectToMqttBroker() {
+//     _mqttClient?.disconnect();
+//     _connectToMqttBroker();
+//   }
+// 
+//   @override
+//   Widget build(BuildContext context) {
+//     return Scaffold(
+//       appBar: AppBar(
+//         title: const Text('MQTT Chat App'),
+//       ),
+//       body: Column(
+//         children: [
+//           Expanded(
+//             child: ListView.builder(
+//               itemCount: _messages.length,
+//               itemBuilder: (context, index) {
+//                 return ListTile(
+//                   title: Text(_messages[index]),
+//                 );
+//               },
+//             ),
+//           ),
+//           Padding(
+//             padding: const EdgeInsets.all(8.0),
+//             child: Row(
+//               children: [
+//                 Expanded(
+//                   child: TextField(
+//                     controller: _messageController,
+//                     decoration: const InputDecoration(
+//                       hintText: 'Type a message...',
+//                     ),
+//                     onSubmitted: _sendMessage,
+//                   ),
+//                 ),
+//                 IconButton(
+//                   icon: const Icon(Icons.send),
+//                   onPressed: () {
+//                     _sendMessage(_messageController.text);
+//                   },
+//                 ),
+//               ],
+//             ),
+//           ),
+//         ],
+//       ),
+//     );
+//   }
+// 
+//   @override
+//   void dispose() {
+//     _mqttClient?.unsubscribe('chat');
+//     _mqttClient?.disconnect();
+//     super.dispose();
+//   }
+// }
