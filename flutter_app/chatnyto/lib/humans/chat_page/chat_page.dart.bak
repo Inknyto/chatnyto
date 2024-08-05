@@ -1,0 +1,278 @@
+import 'dart:io';
+import 'package:flutter/foundation.dart';
+import 'dart:convert';
+import 'package:flutter/material.dart';
+import 'package:mqtt_client/mqtt_client.dart';
+import 'package:mqtt_client/mqtt_server_client.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_quill/flutter_quill.dart' as quill;
+
+class ChatPage extends StatefulWidget {
+  const ChatPage({
+    super.key,
+    required this.deviceIP,
+    required this.brokerIP,
+    required this.topicName
+  });
+
+  final String brokerIP;
+  final String topicName;
+  final String deviceIP;
+
+  @override
+  State<ChatPage> createState() => _ChatPageState();
+}
+
+class _ChatPageState extends State<ChatPage> {
+  MqttServerClient? _mqttClient;
+  final List<quill.Document> _messages = [];
+  late quill.QuillController _messageController;
+  bool _isConnected = false;
+  String _deviceIp = '';
+  bool _showToolbar = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _messageController = quill.QuillController.basic();
+    _loadMessages();
+    _connectToMqttBroker(widget.brokerIP, widget.topicName);
+  }
+
+  Future<void> _loadMessages() async {
+    final prefs = await SharedPreferences.getInstance();
+    final brokerIP = widget.brokerIP;
+    final topicName = widget.topicName;
+    final messagesJson = prefs.getStringList('$brokerIP:$topicName') ?? [];
+    setState(() {
+      _messages.clear();
+      _messages.addAll(messagesJson.map((json) => 
+        quill.Document.fromJson(jsonDecode(json))
+      ));
+    });
+  }
+
+  Future<void> _saveMessages() async {
+    final brokerIP = widget.brokerIP;
+    final topicName = widget.topicName;
+    final prefs = await SharedPreferences.getInstance();
+    final messagesJson = _messages.map((doc) => 
+      jsonEncode(doc.toDelta().toJson())
+    ).toList();
+    await prefs.setStringList('$brokerIP:$topicName', messagesJson);
+  }
+
+  void _connectToMqttBroker(String brokerIP, String topicName) async {
+    String deviceIp = await _getDeviceIPAddress();
+    if (kDebugMode) {
+      print('device ip to be set as client id: $deviceIp');
+    }
+    _mqttClient = MqttServerClient(brokerIP, deviceIp);
+    _mqttClient?.onConnected = () {
+      if (kDebugMode) {
+        print('Connected to MQTT broker: ${widget.brokerIP}');
+      }
+      _mqttClient?.subscribe(topicName, MqttQos.atMostOnce);
+      setState(() {
+        _isConnected = true;
+      });
+    };
+    _mqttClient?.onDisconnected = () {
+      if (kDebugMode) {
+        print('Disconnected from MQTT broker: ${widget.brokerIP}');
+      }
+      setState(() {
+        _isConnected = false;
+      });
+    };
+    _mqttClient?.connect(widget.brokerIP);
+    _mqttClient?.updates?.listen((List<MqttReceivedMessage<MqttMessage?>> event) {
+      final recMess = event[0].payload as MqttPublishMessage;
+      final message = utf8.decode(recMess.payload.message);
+      
+      // Parse the received message
+      Map<String, dynamic> messageData = jsonDecode(message);
+      String senderIp = messageData['sender'];
+      List<dynamic> delta = messageData['delta'];
+      
+      // Create a new Quill document from the received delta
+      final newMessage = quill.Document.fromJson(delta);
+      
+      setState(() {
+        _messages.add(newMessage);
+      });
+    });
+  }
+
+  void updateBrokerIP(String newTopicName, String newBrokerIP) {
+    _mqttClient?.unsubscribe(newTopicName);
+    _mqttClient?.disconnect();
+    _mqttClient = null;
+    _connectToMqttBroker(newBrokerIP, newTopicName);
+  }
+
+  Future<String> _getDeviceIPAddress() async {
+    String ipAddress = '';
+    List<NetworkInterface> interfaces = await NetworkInterface.list();
+    for (var interface in interfaces) {
+      for (var addr in interface.addresses) {
+        if (addr.type == InternetAddressType.IPv4 && !addr.isLoopback) {
+          ipAddress = addr.address;
+          break;
+        }
+      }
+      if (ipAddress.isNotEmpty) break;
+    }
+    ipAddress = ipAddress.isEmpty ? '127.0.0.1' : ipAddress;
+    setState(() {
+      _deviceIp = ipAddress;
+    });
+    return ipAddress;
+  }
+
+  void _sendMessage() {
+    if (_isConnected) {
+      final delta = _messageController.document.toDelta().toJson();
+      if (delta.isNotEmpty) {
+        // Create a message object with sender info and delta
+        final messageObject = {
+          'sender': _deviceIp,
+          'delta': delta,
+        };
+        final messageJson = jsonEncode(messageObject);
+        
+        
+        final builder = MqttClientPayloadBuilder();
+        builder.addString(messageJson);
+        _mqttClient?.publishMessage(
+          widget.topicName, MqttQos.atMostOnce, builder.payload!);
+        
+        // Add the sent message to the local messages list
+        setState(() {
+          _messages.add(_messageController.document);
+        });
+        
+        _messageController.clear();
+      }
+    } else {
+      showDialog(
+        context: context,
+        builder: (BuildContext context) {
+          return AlertDialog(
+            title: const Text('Not Connected'),
+            content: const Text(
+              'You are not connected to the MQTT broker.',
+              style: TextStyle(color: Colors.black),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('OK'),
+              ),
+            ],
+          );
+        },
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(
+          _isConnected
+              ? 'Chatnyto, $_deviceIp   🟢Online'
+              : 'Chatnyto, $_deviceIp   🔴Offline',
+          style: const TextStyle(color: Colors.black),
+        ),
+        actions: [
+          IconButton(
+            icon: _showToolbar
+                ? const Icon(Icons.arrow_drop_up_sharp)
+                : const Icon(Icons.arrow_drop_down_sharp),
+            onPressed: () => setState(() => _showToolbar = !_showToolbar),
+          ),
+        ],
+      ),
+      body: Column(
+        children: [
+          if (_showToolbar)
+            quill.QuillToolbar.simple(
+              configurations: quill.QuillSimpleToolbarConfigurations(
+                controller: _messageController,
+                showBoldButton: true,
+                showItalicButton: true,
+                showUnderLineButton: true,
+                showStrikeThrough: true,
+                showColorButton: true,
+                showBackgroundColorButton: true,
+              ),
+            ),
+          Expanded(
+            child: ListView.builder(
+              itemCount: _messages.length,
+              itemBuilder: (context, index) {
+                return Padding(
+                  padding: const EdgeInsets.all(8.0),
+                  child: quill.QuillEditor(
+                    configurations: quill.QuillEditorConfigurations(
+                      controller: quill.QuillController(
+                        document: _messages[index],
+                        selection: const TextSelection.collapsed(offset: 0),
+                        readOnly: true,
+                      ),
+                      showCursor: false,
+                      padding: EdgeInsets.zero,
+                    ),
+                    scrollController: ScrollController(),
+                    focusNode: FocusNode(),
+                  ),
+                );
+              },
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(8.0),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Container(
+                    decoration: BoxDecoration(
+                      border: Border.all(color: Colors.grey),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: quill.QuillEditor(
+                      configurations: quill.QuillEditorConfigurations(
+                        controller: _messageController,
+                        autoFocus: true,
+                        placeholder: 'Type a message...',
+                        expands: false,
+                        padding: EdgeInsets.zero,
+                      ),
+                      scrollController: ScrollController(),
+                      focusNode: FocusNode(),
+                    ),
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.send),
+                  onPressed: _sendMessage,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    _saveMessages();
+    _mqttClient?.unsubscribe(widget.topicName);
+    _mqttClient?.disconnect();
+    _messageController.dispose();
+    super.dispose();
+  }
+}
