@@ -16,7 +16,7 @@ class _ChatBotPageState extends State<ChatBotPage> {
 
   Future<void> _sendMessage(String message) async {
     _messages.add('User: $message');
-    _messages.add('\n\n');
+//    _messages.add('\n\n');
     setState(() {});
 
     try {

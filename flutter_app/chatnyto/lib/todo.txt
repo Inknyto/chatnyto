@@ -1,22 +1,29 @@
-put a sidebar in the scaffold
-set the three categories (humans, robots, ai) + the account management
-as sidebar's content 
+[x] DONE — put a sidebar in the scaffold
+[x] DONE — set the three categories (humans, robots, ai) + the account
+    management as sidebar's content (my_app/app_drawer.dart; also Brokers
+    and Security & Identity entries)
 
-add four pages for each entity:
+[x] DONE — four pages for each entity:
 
-	humans: single person(latest or saved chat(favourite) ),
- 		group chat,
-		parameters
-		explore (heatmap, newsfeed)
-		
-	robots: single robot,
-		group of robots
-		parameters
-		learn (make, connect)
+	humans: single person(latest or saved chat(favourite) ),  -> chat_page
+ 		group chat,                                       -> connections_page
+		parameters                                        -> settings_page
+		explore (heatmap, newsfeed)                       -> heat_map_page (presence newsfeed)
 
-	ai: 	your ai
-		other people's ai (repondeur)
-		parameters
-		craft (prompt, customize ai)
+	robots: single robot,                                     -> chat_page
+		group of robots                                   -> connections_page
+		parameters                                        -> connection_page + settings
+		learn (make, connect)                             -> chatbot_page
 
-Then, make everything work remotely
+	ai: 	your ai                                           -> chat_page
+		other people's ai (repondeur)                     -> connections_page
+		parameters                                        -> connection_page + settings
+		craft (prompt, customize ai)                      -> chatbot_page
+
+[x] DONE — everything works remotely over MQTT (any reachable broker,
+    including the Heltec V3 LoRa broker; messages E2E encrypted)
+
+[x] DONE — the same connection type is used for each entity: you add a
+    friend, a robot or an ai with broker address + topic (+ optional
+    passphrase), and the add dialog lists the informations on how to join
+    that entity.

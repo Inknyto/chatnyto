@@ -4,9 +4,12 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:cryptography/cryptography.dart';
 import 'package:mqtt_client/mqtt_client.dart';
 import 'package:mqtt_client/mqtt_server_client.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+import '../../core/crypto/crypto_service.dart';
 
 class ChatPage extends StatefulWidget {
   const ChatPage(
@@ -59,7 +62,10 @@ class _ChatPageState extends State<ChatPage> {
     await prefs.setStringList('$brokerIP:$topicName', messagesJson);
   }
 
+  SecretKey? _channelKey;
+
   void _connectToMqttBroker(String brokerIP, String topicName) async {
+    _channelKey = await MessageCrypto.deriveChannelKey('', topicName);
     String deviceIp = await _getDeviceIPAddress();
     if (kDebugMode) {
       print('device ip to be set as client id: $deviceIp');
@@ -87,7 +93,7 @@ class _ChatPageState extends State<ChatPage> {
       print(widget.brokerIP);
     }
     _mqttClient?.updates
-        ?.listen((List<MqttReceivedMessage<MqttMessage?>> event) {
+        ?.listen((List<MqttReceivedMessage<MqttMessage?>> event) async {
       final recMess = event[0].payload;
 
       final pubMess = recMess as MqttPublishMessage;
@@ -95,7 +101,10 @@ class _ChatPageState extends State<ChatPage> {
       final topicName = pubMess.variableHeader?.topicName;
 
       // final senderIP = utf8.decode(pubMess.payload.message);
-      final message = utf8.decode(pubMess.payload.message);
+      final raw = utf8.decode(pubMess.payload.message);
+      // Decrypt the envelope; fall back to plaintext from legacy clients.
+      final message =
+          await MessageCrypto.decryptEnvelope(raw, _channelKey!) ?? raw;
 
       final sentHour = DateTime.now().hour;
       final sentMinute = DateTime.now().minute;
@@ -154,13 +163,15 @@ class _ChatPageState extends State<ChatPage> {
     return interfaces;
   }
 
-  void _sendMessage(String message) {
+  void _sendMessage(String message) async {
     if (kDebugMode) {
       print("message to be sent: $message");
     }
     if (_isConnected) {
+      final envelope = await MessageCrypto.encryptEnvelope(
+          "$_deviceIp ~> $message", _channelKey!);
       final builder = MqttClientPayloadBuilder();
-      builder.addString("$_deviceIp ~> $message");
+      builder.addString(envelope);
       _mqttClient?.publishMessage(
           widget.topicName, MqttQos.atMostOnce, builder.payload!);
       _messageController.clear();

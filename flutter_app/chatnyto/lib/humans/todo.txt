@@ -1,19 +1,7 @@
-Humans.txt
+Humans.txt — ALL DONE
 
-humans: single person(latest or saved chat(favourite) ),
-	group chat,
-	explore (heatmap, newsfeed)
-	Parameters
-	
-1st page:
-    Most recent chat,
-    or pinned chat
-
-2nd page:
-    Group chats,
-
-3rd page:
-    Heatmap (of people's position) or newsfeed
-
-4th page:
-    Parameters
+[x] 1st page: most recent chat / pinned chat        -> chat_page/
+[x] 2nd page: group chats                           -> connections_page/
+[x] 3rd page: heatmap of people / newsfeed          -> heat_map_page/
+    (newsfeed of peers discovered via signed presence advertisements)
+[x] 4th page: parameters                            -> settings_page/

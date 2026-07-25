@@ -1,8 +1,10 @@
-import 'dart:convert';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 
+import '../../core/brokers/broker_service.dart';
+import '../../core/widgets/liquid_glass.dart';
+
+/// Explore page: a newsfeed of the people discovered on the connected
+/// brokers through their signed presence advertisements.
 class HeatMapPage extends StatefulWidget {
   const HeatMapPage({super.key});
 
@@ -11,83 +13,70 @@ class HeatMapPage extends StatefulWidget {
 }
 
 class _HeatMapPageState extends State<HeatMapPage> {
-  final TextEditingController _textController = TextEditingController();
-  final List<String> _messages = [];
+  final BrokerService _service = BrokerService.instance;
 
-  Future<void> _sendMessage(String message) async {
-    _messages.add('User: $message');
-    _messages.add('\n\n');
-    setState(() {});
+  @override
+  void initState() {
+    super.initState();
+    _service.load();
+    _service.addListener(_onChanged);
+  }
 
-    try {
-      final request =
-          http.Request('POST', Uri.parse('http://127.0.0.1:3000/send'));
-      request.headers['Content-Type'] = 'application/json';
-      request.body = jsonEncode({'message': message});
+  @override
+  void dispose() {
+    _service.removeListener(_onChanged);
+    super.dispose();
+  }
 
-      final response = await request.send();
-
-      if (response.statusCode == 200) {
-        final stream = response.stream.transform(utf8.decoder);
-        _messages.add('Chatbot: ');
-        await for (final data in stream) {
-          _messages.add(data);
-          setState(() {});
-        }
-      } else {
-        _messages.add('An error occurred during chatbot processing.');
-        setState(() {});
-      }
-    } catch (e) {
-      if (kDebugMode) {
-        print('Error: $e');
-      }
-    }
+  void _onChanged() {
+    if (mounted) setState(() {});
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Chatnyto Bot'),
-      ),
-      body: Column(
-        children: [
-          Expanded(
-            child: Wrap(
-              children: _messages
-                  .map(
-                    (message) => Text(
-                      message,
-                      style: const TextStyle(color: Colors.black, fontSize: 16),
-                    ),
-                  )
-                  .toList(),
+    final peers = _service.peers;
+    final connectedCount =
+        _service.brokers.where(_service.isConnected).length;
+    return GlassBackground(
+      child: Scaffold(
+        backgroundColor: Colors.transparent,
+        appBar: AppBar(title: const Text('Explore')),
+        body: ListView(
+          padding: const EdgeInsets.all(12),
+          children: [
+            LiquidGlass(
+              margin: const EdgeInsets.symmetric(vertical: 6),
+              child: ListTile(
+                leading: const Icon(Icons.radar_rounded),
+                title: Text('$connectedCount broker(s) connected'),
+                subtitle: Text(peers.isEmpty
+                    ? 'Connect to a broker (menu → Brokers) to discover '
+                        'people around you.'
+                    : '${peers.length} people advertising on the network'),
+              ),
             ),
-          ),
-          Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: _textController,
-                  decoration: const InputDecoration(
-                    hintText: 'It was a dark and stormy night...',
+            for (final peer in peers)
+              LiquidGlass(
+                margin: const EdgeInsets.symmetric(vertical: 6),
+                child: ListTile(
+                  leading: CircleAvatar(
+                    child: Text(peer.name.isEmpty
+                        ? '?'
+                        : peer.name[0].toUpperCase()),
                   ),
+                  title: Text(peer.name),
+                  subtitle: Text('Verified key ${peer.fingerprint}'),
+                  trailing: const Icon(Icons.verified_rounded,
+                      color: Colors.greenAccent),
                 ),
               ),
-              ElevatedButton(
-                onPressed: () {
-                  final message = _textController.text.trim();
-                  if (message.isNotEmpty) {
-                    _textController.clear();
-                    _sendMessage(message);
-                  }
-                },
-                child: const Text('Send'),
+            if (peers.isEmpty)
+              const Padding(
+                padding: EdgeInsets.only(top: 24),
+                child: GlassShimmer(count: 4),
               ),
-            ],
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

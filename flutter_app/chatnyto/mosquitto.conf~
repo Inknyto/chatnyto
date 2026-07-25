@@ -1,4 +1,17 @@
+# Mosquitto configuration file
+
+# Allow anonymous connections
 allow_anonymous true
-user root
+
+# Default user
+user mosquitto
+
+# Listen on all interfaces, port 1883
 listener 1883 0.0.0.0
-password_file /data/realroot/mosquitto/passwd.txt
+
+# Password file location
+# password_file /data/realroot/mosquitto/passwd.txt
+
+# Allow read and write access to the 'chat' topic
+# topic read chat
+# topic write chat

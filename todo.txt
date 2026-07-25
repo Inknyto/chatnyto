@@ -1,0 +1,76 @@
+Done: [x] DONE — You have to rewrite an old app:
+Done: [x] DONE — Read the current project to understand it fully: flutter_app/chatnyto/
+Done: [x] DONE — Implement all the placeholders in the flutter app (account settings,
+Done:     entity parameter pages, language/theme handlers are now functional).
+Done:     The app is native on every platform (android/ios/linux/macos/windows
+Done:     targets in flutter_app/chatnyto) and communicates without the internet
+Done:     over MQTT.
+Done: [x] DONE — MQTT broker on the Heltec V3: esp32_broker/build_heltec_v3.sh +
+Done:     flash_heltec_v3.sh build/flash the broker for esp32s3; the lora_bridge
+Done:     firmware component relays MQTT over LoRa (SX1262), defaulting to the
+Done:     maximum authorized band/power (menuconfig: LoRa Bridge Configuration)
+Done:     with the fastest standard modulation (SF7/125kHz) for instant messages.
+Done: [x] DONE — Reorganize the app visually (whatsapp-clone/ contains only notes,
+Done:     no reusable code): chat-first pages per category, liquid glass design
+Done:     (lib/core/widgets/liquid_glass.dart), smooth rounded icons.
+Done: [x] DONE — Dark/light mode (lib/core/theme/, persisted; toggle in the
+Done:     drawer, home app bar and every parameters page).
+Done: [x] DONE — Smooth transitions and loading states (GlassPageRoute fade/slide
+Done:     transitions, GlassShimmer loading placeholders, animated backgrounds).
+Done: [x] DONE — The user advertises himself on the network with a public key:
+Done:     identity = X25519 + Ed25519 key pairs; the self-signed public bundle is
+Done:     published retained on chatnyto/presence/<fingerprint> of every
+Done:     connected broker. The private keys stay AES-256-GCM encrypted with a
+Done:     key derived from the user's password (PBKDF2-HMAC-SHA256, 210k rounds).
+Done:     See lib/core/crypto/crypto_service.dart + Security & Identity page.
+Done: [x] DONE — Securely encrypt all messages and ensure routing: every chat
+Done:     payload is an AES-256-GCM envelope (public channels use a topic-derived
+Done:     key, private channels a shared passphrase, peer-to-peer an X25519 ECDH
+Done:     key); brokers only ever route ciphertext (zero-trust).
+Done: [x] DONE — Add new brokers by name and disconnect from certain brokers:
+Done:     menu -> Brokers (lib/core/brokers/), persisted list, per-broker
+Done:     connect/disconnect switch.
+Done: [x] DONE — Peer-to-peer and group chat, end-to-end encrypted (zero-trust):
+Done:     connections accept an optional channel passphrase; the same E2EE
+Done:     envelope covers 1:1 and group topics; peers are verified via their
+Done:     signed presence advertisements.
+Done: [x] DONE — Scripts to build and flash esp32_broker/ on the Heltec V3
+Done:     (build_heltec_v3.sh, flash_heltec_v3.sh), broker info (SSID/IP/port) on
+Done:     the Heltec's OLED (components/broker_display), and a command line
+Done:     interface reachable with `screen /dev/ttyUSB0 115200` for configuring
+Done:     the broker (components/broker_console: info, wifi, wifi-clear, reboot).
+Done: [x] DONE — App available on all platforms natively (Flutter targets:
+Done:     android, ios, linux, macos, windows; linux release build verified).
+Done: [x] DONE — When the button for showing/hiding the quill editor is clicked, the
+Done:     entire chat page disappeared, leaving the header. Root cause: flutter_quill 11
+Done:     throws MissingFlutterQuillLocalizationException when its localizations
+Done:     delegate is not registered, and the exception blanked the page body. Fixed by
+Done:     adding FlutterQuillLocalizations.localizationsDelegates to the MaterialApp
+Done:     (lib/my_app/my_app.dart).
+Done: [x] DONE — Read all 73 files in whatsapp-clone/lib and implemented the app layout
+Done:     and components in flutter_app/chatnyto with liquid glass:
+Done:     * lib/core/widgets/wa_components.dart — WaChatTile (avatar/name/preview/time/
+Done:       ticks/unread badge), WaMessageBubble (sender/receiver bubbles with the
+Done:       clone's three-rounded-corner shape, timestamp + blue ticks), WaInputBar
+Done:       (rounded input + circular send button).
+Done:     * humans chats list and chat screen restyled on those components (WhatsApp-
+Done:       style appbar with avatar + online status, bubbles, message FAB).
+Done:     * Custom background image setting: Settings/Account -> Chat wallpaper
+Done:       (lib/core/settings/wallpaper_picker.dart + core/theme/background_controller
+Done:       .dart, persisted). Five bundled backgrounds to choose from in
+Done:       assets/backgrounds/ (midnight_doodle, aurora, sunset_glass, paper_light,
+Done:       forest) plus a plain glass option; applied behind the chat via
+Done:       WallpaperBackdrop. Android release APK rebuilt successfully.
+You have to do a Revamp(Redesign, rebuild) of the chatnyto app. You have concieved the new
+template at whatsapp-clone/ . The whatsapp-clone/ appcomes from the designers of your
+company. You have to implement that new design and user experience on the new app. Show new
+chats by default, make it easy to discover and add people in all the currently connected
+brokers by name and possibility to verify their identity on the network(the existing
+public/private key).
+Add the possibility to choose a chat or a global background image (or even per chats, why
+not)
+Display the identity of the person on their chat page. Implement the initial settings
+configuration from the whatsapp-clone/ app. brokers are just an abstraction. You should
+create an entire new branch for this feature. You are making the chatnyto app a fully
+functionnal chat and social media app. Implement everything that would be needed for
+chatnyto to be easy to use by even non technical people(no complex configurations.)

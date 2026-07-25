@@ -1,3 +1,4 @@
+// ~/Documents/git/chatnyto/flutter_app/chatnyto/android/app/build.gradle 25 Jul 2026 at 09:25:01 PM
 plugins {
     id "com.android.application"
     id "kotlin-android"
@@ -26,11 +27,16 @@ if (flutterVersionName == null) {
 android {
     namespace = "com.example.chatnyto"
     compileSdk = flutter.compileSdkVersion
-    ndkVersion = flutter.ndkVersion
+    // ndkVersion intentionally not set: no plugin ships native code, and
+    // setting it makes AGP download the whole NDK.
 
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_1_8
-        targetCompatibility = JavaVersion.VERSION_1_8
+        sourceCompatibility = JavaVersion.VERSION_11
+        targetCompatibility = JavaVersion.VERSION_11
+    }
+
+    kotlinOptions {
+        jvmTarget = "11"
     }
 
     defaultConfig {

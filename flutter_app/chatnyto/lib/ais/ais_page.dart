@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'bottom_nav_bar.dart';
-import 'notifications_page/notifications_page.dart';
 import 'connection_page/connection_page.dart';
 import 'connections_page/connections_page.dart';
 import 'chat_page/chat_page.dart';
@@ -17,7 +16,7 @@ class _AIsPageState extends State<AIsPage> {
   int _currentIndex = 0;
   final PageController _pageController = PageController(initialPage: 0);
   String _brokerIP = '127.0.0.1'; // Initial broker IP
-  String _deviceIP = '127.0.0.1'; // Initial broker IP
+  final String _deviceIP = '127.0.0.1'; // Initial broker IP
   String _topicName = 'chat'; // Initial broker IP
 
   late List<Widget> pages;
@@ -31,7 +30,6 @@ class _AIsPageState extends State<AIsPage> {
         topicName: _topicName,
         deviceIP: _deviceIP,
       ),
-      // const NotificationsPage(),
       const ConnectionsPage(),
       ConnectionPage(
         updateBrokerIP: updateBrokerIP,

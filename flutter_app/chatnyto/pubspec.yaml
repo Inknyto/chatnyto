@@ -39,8 +39,9 @@ dependencies:
   flutter_svg: ^2.0.10+1
   http: ^1.2.1
   shared_preferences: ^2.2.3
-  settings_ui: ^2.0.2
-  flutter_quill: ^10.1.5
+  settings_ui: ^3.0.1
+  flutter_quill: ^11.5.0
+  cryptography: ^2.7.0
 
 dev_dependencies:
   flutter_test:
@@ -51,7 +52,7 @@ dev_dependencies:
   # activated in the `analysis_options.yaml` file located at the root of your
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
-  flutter_lints: ^4.0.0
+  flutter_lints: ^5.0.0
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
@@ -73,6 +74,7 @@ flutter:
     - assets/humans/
     - assets/robots/
     - assets/ais/
+    - assets/backgrounds/
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/assets-and-images/#resolution-aware
