@@ -4,6 +4,8 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../core/widgets/liquid_glass.dart';
+import '../../core/widgets/wa_components.dart';
 import '../chat_page/chat_page.dart';
 
 class ConnectionsPage extends StatefulWidget {
@@ -46,29 +48,51 @@ class _ConnectionsPageState extends State<ConnectionsPage> {
       builder: (BuildContext context) {
         String brokerIP = '';
         String topicName = '';
+        String secret = '';
 
         return AlertDialog(
           title: const Text('Add New Connection'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                decoration: const InputDecoration(
-                  labelText: 'Broker IP',
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'How to join: ask the other person (or group owner) for '
+                  'the broker address, the topic name, and — for a private '
+                  'channel — the shared passphrase. Everyone using the same '
+                  'three values ends up in the same encrypted chat.',
+                  style: TextStyle(fontSize: 13),
                 ),
-                onChanged: (value) {
-                  brokerIP = value;
-                },
-              ),
-              TextField(
-                decoration: const InputDecoration(
-                  labelText: 'Topic Name',
+                const SizedBox(height: 12),
+                TextField(
+                  decoration: const InputDecoration(
+                    labelText: 'Broker IP / hostname',
+                  ),
+                  onChanged: (value) {
+                    brokerIP = value;
+                  },
                 ),
-                onChanged: (value) {
-                  topicName = value;
-                },
-              ),
-            ],
+                TextField(
+                  decoration: const InputDecoration(
+                    labelText: 'Topic Name',
+                  ),
+                  onChanged: (value) {
+                    topicName = value;
+                  },
+                ),
+                TextField(
+                  obscureText: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Channel passphrase (optional)',
+                    helperText: 'Set for a private end-to-end encrypted channel',
+                  ),
+                  onChanged: (value) {
+                    secret = value;
+                  },
+                ),
+              ],
+            ),
           ),
           actions: [
             TextButton(
@@ -84,6 +108,7 @@ class _ConnectionsPageState extends State<ConnectionsPage> {
                     _connections.add({
                       'brokerIP': brokerIP,
                       'topicName': topicName,
+                      'secret': secret,
                     });
                   });
                   _saveConnections(); // Save connections after adding a new one
@@ -105,6 +130,7 @@ class _ConnectionsPageState extends State<ConnectionsPage> {
         builder: (context) => ChatPage(
           brokerIP: connection['brokerIP']!,
           topicName: connection['topicName']!,
+          channelSecret: connection['secret'] ?? '',
           deviceIP: '', // You can pass an empty string here
         ),
       ),
@@ -113,30 +139,57 @@ class _ConnectionsPageState extends State<ConnectionsPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Connections'),
-      ),
-      body: ListView.builder(
-        itemCount: _connections.length,
-        itemBuilder: (context, index) {
-          final connection = _connections[index];
-          return ListTile(
-            title:
-                Text('${connection['brokerIP']} - ${connection['topicName']}'),
-            onTap: () => _navigateToChat(connection),
-            onLongPress: () => {
-              setState(() {
-                _connections.remove(connection);
-                _saveConnections();
-              })
-            },
-          );
-        },
-      ),
-      floatingActionButton: FloatingActionButton(
-        child: const Icon(Icons.add),
-        onPressed: _addConnection,
+    return GlassBackground(
+      child: Scaffold(
+        backgroundColor: Colors.transparent,
+        appBar: AppBar(
+          title: const Text(
+            'ChatNyto',
+            style: TextStyle(fontWeight: FontWeight.bold),
+          ),
+          actions: [
+            IconButton(
+              onPressed: _addConnection,
+              icon: const Icon(Icons.search_rounded),
+            ),
+            IconButton(
+              onPressed: _addConnection,
+              icon: const Icon(Icons.more_vert_rounded),
+            ),
+          ],
+        ),
+        body: _connections.isEmpty
+            ? const Center(
+                child: LiquidGlass(
+                  margin: EdgeInsets.all(24),
+                  padding: EdgeInsets.all(20),
+                  child: Text(
+                      'No chats yet.\nTap the button below to join one.',
+                      textAlign: TextAlign.center),
+                ),
+              )
+            : ListView.builder(
+                padding: const EdgeInsets.symmetric(vertical: 6),
+                itemCount: _connections.length,
+                itemBuilder: (context, index) {
+                  final connection = _connections[index];
+                  final private = (connection['secret'] ?? '').isNotEmpty;
+                  return WaChatTile(
+                    title: connection['topicName'] ?? '',
+                    subtitle:
+                        '${private ? "🔒 " : ""}on ${connection['brokerIP']}',
+                    onTap: () => _navigateToChat(connection),
+                    onLongPress: () => setState(() {
+                      _connections.remove(connection);
+                      _saveConnections();
+                    }),
+                  );
+                },
+              ),
+        floatingActionButton: FloatingActionButton(
+          onPressed: _addConnection,
+          child: const Icon(Icons.message_rounded),
+        ),
       ),
     );
   }

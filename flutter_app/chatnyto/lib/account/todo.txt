@@ -1,22 +1,8 @@
-put a sidebar in the scaffold
-set the three categories (humans, robots, ai) + the account management
-as sidebar's content 
-
-add four pages for each entity:
-
-	humans: single person(latest or saved chat(favourite) ),
- 		group chat,
-		parameters
-		explore (heatmap, newsfeed)
-		
-	robots: single robot,
-		group of robots
-		parameters
-		learn (make, connect)
-
-	ai: 	your ai
-		other people's ai (repondeur)
-		parameters
-		craft (prompt, customize ai)
-
-Then, make everything work remotely
+[x] DONE — sidebar in the scaffold with the three categories (humans,
+    robots, ai) + account management (see my_app/app_drawer.dart).
+[x] DONE — four pages per entity (chat, connections/groups, parameters,
+    explore/learn/craft) — see lib/todo.txt for the mapping.
+[x] DONE — everything works remotely over MQTT with E2E encryption.
+    Account management itself: profile fields, security (keys/encryption),
+    notifications, privacy, language, theme and about are implemented in
+    account/account_page.dart + account/security_page.dart.

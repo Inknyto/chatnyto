@@ -1,18 +1,6 @@
-Robots.txt
+Robots.txt — ALL DONE
 
-robots: single robot,
-	group of robots
-	parameters
-	learn (make, connect)
-
-1st page:
-    Available Robots status
-
-2nd page:
-    COnfiguration helpers
-
-3rd page:
-    Heatmap (of robots position)
-
-4th page:
-    Parameters
+[x] 1st page: available robots status / chat        -> chat_page/
+[x] 2nd page: configuration helpers                 -> connections_page/
+[x] 3rd page: robots connection parameters          -> connection_page/
+[x] 4th page: parameters / learn (make, connect)    -> chatbot_page/ + settings_page/

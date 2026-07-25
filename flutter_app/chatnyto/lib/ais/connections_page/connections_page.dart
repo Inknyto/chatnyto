@@ -51,7 +51,15 @@ class _ConnectionsPageState extends State<ConnectionsPage> {
           title: const Text('Add New Connection'),
           content: Column(
             mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              const Text(
+                'How to join: every entity (friend, robot or AI) is reached '
+                'the same way — the address of the broker it listens on and '
+                'its topic name. Ask the owner for these two values.',
+                style: TextStyle(fontSize: 13),
+              ),
+              const SizedBox(height: 12),
               TextField(
                 decoration: const InputDecoration(
                   labelText: 'Broker IP',

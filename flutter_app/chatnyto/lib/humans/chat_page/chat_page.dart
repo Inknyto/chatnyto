@@ -1,5 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_quill/flutter_quill.dart' as quill;
+
+import '../../core/theme/background_controller.dart';
+import '../../core/widgets/liquid_glass.dart';
+import '../../core/widgets/wa_components.dart';
 import 'mqtt_service.dart';
 import 'message_storage.dart';
 import 'models/chat_message.dart';
@@ -9,12 +13,16 @@ class ChatPage extends StatefulWidget {
     super.key,
     required this.deviceIP,
     required this.brokerIP,
-    required this.topicName
+    required this.topicName,
+    this.channelSecret = '',
   });
 
   final String brokerIP;
   final String topicName;
   final String deviceIP;
+
+  /// Optional passphrase upgrading this channel to a private E2EE channel.
+  final String channelSecret;
 
   @override
   State<ChatPage> createState() => _ChatPageState();
@@ -50,6 +58,7 @@ class _ChatPageState extends State<ChatPage> {
       brokerIP: widget.brokerIP,
       topicName: widget.topicName,
       deviceIP: _deviceIp,
+      channelSecret: widget.channelSecret,
       onConnected: () => setState(() => _isConnected = true),
       onDisconnected: () => setState(() => _isConnected = false),
       onMessageReceived: _onMessageReceived,
@@ -102,24 +111,81 @@ class _ChatPageState extends State<ChatPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(_isConnected ? 'Chatnyto, $_deviceIp 🟢Online' : 'Chatnyto, $_deviceIp 🔴Offline'),
-      ),
-      body: Column(
-        children: [
-          Expanded(child: _buildMessageList()),
-          if (_showToolbar) _buildToolbar(),
-          _buildMessageInput(),
-        ],
+    final scheme = Theme.of(context).colorScheme;
+    return GlassBackground(
+      child: Scaffold(
+        backgroundColor: Colors.transparent,
+        appBar: AppBar(
+          leadingWidth: 30,
+          title: Row(
+            children: [
+              CircleAvatar(
+                backgroundColor: scheme.primaryContainer,
+                child: Text(
+                  widget.topicName.isEmpty
+                      ? '?'
+                      : widget.topicName[0].toUpperCase(),
+                  style: TextStyle(color: scheme.onPrimaryContainer),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      widget.topicName,
+                      style: const TextStyle(
+                          fontSize: 17, fontWeight: FontWeight.w500),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    Text(
+                      _isConnected ? '$_deviceIp · online' : 'offline',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: _isConnected
+                            ? Colors.greenAccent
+                            : scheme.onSurface.withOpacity(0.6),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            Padding(
+              padding: const EdgeInsets.only(right: 12),
+              child: Tooltip(
+                message: widget.channelSecret.isEmpty
+                    ? 'Encrypted (public channel key)'
+                    : 'End-to-end encrypted (private passphrase)',
+                child: Icon(
+                  widget.channelSecret.isEmpty
+                      ? Icons.lock_outline_rounded
+                      : Icons.lock_rounded,
+                ),
+              ),
+            ),
+          ],
+        ),
+        body: WallpaperBackdrop(
+          child: Column(
+            children: [
+              Expanded(child: _buildMessageList()),
+              if (_showToolbar) LiquidGlass(child: _buildToolbar()),
+              _buildMessageInput(),
+            ],
+          ),
+        ),
       ),
     );
   }
 
   Widget _buildToolbar() {
-    return quill.QuillToolbar.simple(
-      configurations: quill.QuillSimpleToolbarConfigurations(
-        controller: _messageController,
+    return quill.QuillSimpleToolbar(
+      controller: _messageController,
+      config: const quill.QuillSimpleToolbarConfig(
         showBoldButton: true,
         showItalicButton: true,
         showUnderLineButton: true,
@@ -132,17 +198,20 @@ class _ChatPageState extends State<ChatPage> {
 
   Widget _buildMessageList() {
     return ListView.builder(
+      padding: const EdgeInsets.symmetric(vertical: 8),
       itemCount: _messages.length,
       itemBuilder: (context, index) {
-        return Padding(
-          padding: const EdgeInsets.all(8.0),
+        final message = _messages[index];
+        return WaMessageBubble(
+          isMine: message.sender == _deviceIp,
+          timeStamp: message.timeLabel,
           child: quill.QuillEditor(
-            configurations: quill.QuillEditorConfigurations(
-              controller: quill.QuillController(
-                document: _messages[index].toDocument(),
-                selection: const TextSelection.collapsed(offset: 0),
-                readOnly: true,
-              ),
+            controller: quill.QuillController(
+              document: message.toDocument(),
+              selection: const TextSelection.collapsed(offset: 0),
+              readOnly: true,
+            ),
+            config: const quill.QuillEditorConfig(
               showCursor: false,
               padding: EdgeInsets.zero,
             ),
@@ -155,40 +224,30 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   Widget _buildMessageInput() {
-    return Padding(
-      padding: const EdgeInsets.all(8.0),
-      child: Row(
-        children: [
-        
-          IconButton(
-            icon: Icon(_showToolbar ? Icons.arrow_drop_up_sharp : Icons.arrow_drop_down_sharp),
-            onPressed: () => setState(() => _showToolbar = !_showToolbar),
+    return WaInputBar(
+      onSend: _sendMessage,
+      leading: [
+        IconButton(
+          tooltip: 'Formatting',
+          icon: Icon(_showToolbar
+              ? Icons.keyboard_arrow_down_rounded
+              : Icons.text_format_rounded),
+          onPressed: () => setState(() => _showToolbar = !_showToolbar),
+        ),
+      ],
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        child: quill.QuillEditor(
+          controller: _messageController,
+          config: const quill.QuillEditorConfig(
+            autoFocus: true,
+            placeholder: 'Message',
+            expands: false,
+            padding: EdgeInsets.zero,
           ),
-       
-          Expanded(
-            child: Container(
-              decoration: BoxDecoration(
-                border: Border.all(color: Colors.grey),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: quill.QuillEditor(
-                configurations: quill.QuillEditorConfigurations(
-                  controller: _messageController,
-                  autoFocus: true,
-                  placeholder: 'Type a message...',
-                  expands: false,
-                  padding: EdgeInsets.zero,
-                ),
-                scrollController: ScrollController(),
-                focusNode: FocusNode(),
-              ),
-            ),
-          ),
-          IconButton(
-            icon: const Icon(Icons.send),
-            onPressed: _sendMessage,
-          ),
-        ],
+          scrollController: ScrollController(),
+          focusNode: FocusNode(),
+        ),
       ),
     );
   }
