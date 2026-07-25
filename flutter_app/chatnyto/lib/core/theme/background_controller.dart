@@ -21,24 +21,45 @@ class ChatWallpaper {
 }
 
 /// Persisted custom background image selection, applied to chat screens.
+/// Supports one global wallpaper plus optional per-chat overrides.
 class BackgroundController extends ValueNotifier<ChatWallpaper> {
   BackgroundController._() : super(ChatWallpaper.none);
 
   static final BackgroundController instance = BackgroundController._();
 
   static const _prefKey = 'chat.wallpaper';
+  static const _chatPrefPrefix = 'chat.wallpaper.of.';
   bool _loaded = false;
+  final Map<String, String> _perChat = {};
 
   Future<void> load() async {
     if (_loaded) return;
     _loaded = true;
     final prefs = await SharedPreferences.getInstance();
     final stored = prefs.getString(_prefKey);
-    value = ChatWallpaper.all.firstWhere(
-      (w) => w.asset == stored,
-      orElse: () => ChatWallpaper.none,
-    );
+    for (final key in prefs.getKeys()) {
+      if (key.startsWith(_chatPrefPrefix)) {
+        _perChat[key.substring(_chatPrefPrefix.length)] =
+            prefs.getString(key)!;
+      }
+    }
+    value = _byAsset(stored);
   }
+
+  static ChatWallpaper _byAsset(String? asset) => ChatWallpaper.all.firstWhere(
+        (w) => w.asset == asset,
+        orElse: () => ChatWallpaper.none,
+      );
+
+  /// Effective wallpaper for [chatId] (per-chat override, else global).
+  ChatWallpaper forChat(String? chatId) {
+    if (chatId != null && _perChat.containsKey(chatId)) {
+      return _byAsset(_perChat[chatId]);
+    }
+    return value;
+  }
+
+  bool hasOverride(String chatId) => _perChat.containsKey(chatId);
 
   Future<void> select(ChatWallpaper wallpaper) async {
     value = wallpaper;
@@ -48,23 +69,40 @@ class BackgroundController extends ValueNotifier<ChatWallpaper> {
     } else {
       await prefs.setString(_prefKey, wallpaper.asset!);
     }
+    notifyListeners();
+  }
+
+  /// Sets a per-chat override; pass null wallpaper to clear the override.
+  Future<void> selectForChat(String chatId, ChatWallpaper? wallpaper) async {
+    final prefs = await SharedPreferences.getInstance();
+    if (wallpaper == null) {
+      _perChat.remove(chatId);
+      await prefs.remove('$_chatPrefPrefix$chatId');
+    } else {
+      _perChat[chatId] = wallpaper.asset ?? '';
+      await prefs.setString('$_chatPrefPrefix$chatId', wallpaper.asset ?? '');
+    }
+    notifyListeners();
   }
 }
 
 /// Paints the selected wallpaper behind [child]; falls back to nothing
-/// (transparent) when no wallpaper is selected.
+/// (transparent) when no wallpaper is selected. Pass [chatId] to honor a
+/// per-chat override.
 class WallpaperBackdrop extends StatelessWidget {
-  const WallpaperBackdrop({super.key, required this.child});
+  const WallpaperBackdrop({super.key, required this.child, this.chatId});
 
   final Widget child;
+  final String? chatId;
 
   @override
   Widget build(BuildContext context) {
     BackgroundController.instance.load();
     return ValueListenableBuilder<ChatWallpaper>(
       valueListenable: BackgroundController.instance,
-      builder: (context, wallpaper, _) {
-        if (wallpaper.asset == null) return child;
+      builder: (context, _, __) {
+        final wallpaper = BackgroundController.instance.forChat(chatId);
+        if (wallpaper.asset == null || wallpaper.asset!.isEmpty) return child;
         return Container(
           decoration: BoxDecoration(
             image: DecorationImage(

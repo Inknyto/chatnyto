@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_quill/flutter_quill.dart';
 
+import '../core/crypto/crypto_service.dart';
 import '../core/theme/app_theme.dart';
 import '../core/theme/theme_controller.dart';
 import '../core/widgets/liquid_glass.dart';
+import '../revamp/home_shell.dart';
+import '../revamp/onboarding.dart';
 import 'app_drawer.dart';
 
 class MyApp extends StatefulWidget {
@@ -34,8 +37,37 @@ class _MyAppState extends State<MyApp> {
           // Required by the quill editor/toolbar widgets; without it they
           // throw and blank the whole page.
           localizationsDelegates: FlutterQuillLocalizations.localizationsDelegates,
-          home: const AppPage(),
+          home: const _Entry(),
         );
+      },
+    );
+  }
+}
+
+/// Decides the start screen: onboarding on first run, unlock for
+/// returning users, otherwise straight to the chats.
+class _Entry extends StatelessWidget {
+  const _Entry();
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<bool>(
+      future: IdentityService.instance.exists(),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData) {
+          return const GlassBackground(
+            child: Scaffold(
+              backgroundColor: Colors.transparent,
+              body: Center(child: CircularProgressIndicator()),
+            ),
+          );
+        }
+        if (!snapshot.data!) return const WelcomeScreen();
+        if (!IdentityService.instance.isUnlocked) {
+          return const UnlockScreen();
+        }
+        startRevampServices();
+        return const HomeShell();
       },
     );
   }
