@@ -61,16 +61,29 @@ Done:       .dart, persisted). Five bundled backgrounds to choose from in
 Done:       assets/backgrounds/ (midnight_doodle, aurora, sunset_glass, paper_light,
 Done:       forest) plus a plain glass option; applied behind the chat via
 Done:       WallpaperBackdrop. Android release APK rebuilt successfully.
-You have to do a Revamp(Redesign, rebuild) of the chatnyto app. You have concieved the new
-template at whatsapp-clone/ . The whatsapp-clone/ appcomes from the designers of your
-company. You have to implement that new design and user experience on the new app. Show new
-chats by default, make it easy to discover and add people in all the currently connected
-brokers by name and possibility to verify their identity on the network(the existing
-public/private key).
-Add the possibility to choose a chat or a global background image (or even per chats, why
-not)
-Display the identity of the person on their chat page. Implement the initial settings
-configuration from the whatsapp-clone/ app. brokers are just an abstraction. You should
-create an entire new branch for this feature. You are making the chatnyto app a fully
-functionnal chat and social media app. Implement everything that would be needed for
-chatnyto to be easy to use by even non technical people(no complex configurations.)
+Done: [x] DONE — Revamp of the chatnyto app on branch revamp/whatsapp-ux, implementing
+Done:     the whatsapp-clone design and UX (lib/revamp/):
+Done:     * Initial settings configuration from the clone: welcome screen ("Agree and
+Done:       continue") -> one-step profile setup (name + password) that silently creates
+Done:       the X25519/Ed25519 identity, saves the profile and auto-connects the default
+Done:       networks; returning users get a simple unlock screen (onboarding.dart).
+Done:     * New chats shown by default: home opens on the Chats tab, sorted by most
+Done:       recent, with unread badges and a New-group button (home_shell.dart).
+Done:     * Easy people discovery on all connected brokers: People tab lists everyone
+Done:       advertising on any connected broker, searchable by name, with identity
+Done:       verification (signed presence checked against their public key; fingerprint
+Done:       + public key shown, one tap to start an E2EE chat) (home_shell.dart).
+Done:     * Global AND per-chat background images: wallpaper picker works globally
+Done:       (Settings) and per chat (chat menu -> "Wallpaper for this chat", with
+Done:       "Use global wallpaper" reset) (background_controller.dart).
+Done:     * Identity displayed on the chat page: verified badge + fingerprint in the
+Done:       header, full identity sheet (public key, copy button) on tap (chat_page.dart).
+Done:     * Brokers are just an abstraction: default networks are configured on first
+Done:       run (Heltec LoRa AP + this device), messages are sent over every connected
+Done:       broker transparently (BrokerService.publishToAll), DMs auto-appear for the
+Done:       recipient, and broker management is tucked away under "Networks (advanced)".
+Done:     * Fully functional chat & social app: DMs (X25519 ECDH E2EE), named group
+Done:       rooms (optional passphrase), Updates tab (who's online + network status),
+Done:       Communities tab (classic humans/robots/AIs sections). No technical
+Done:       configuration required anywhere in the main flow (chat_service.dart).
+Done:     Android release APK builds; flutter analyze has zero errors.

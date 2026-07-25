@@ -3,9 +3,12 @@ import 'package:flutter/material.dart';
 import '../theme/background_controller.dart';
 import '../widgets/liquid_glass.dart';
 
-/// Grid of bundled background images the user can apply to chats.
+/// Grid of bundled background images the user can apply globally, or —
+/// when [chatId] is given — to a single chat.
 class WallpaperPickerPage extends StatelessWidget {
-  const WallpaperPickerPage({super.key});
+  const WallpaperPickerPage({super.key, this.chatId});
+
+  final String? chatId;
 
   @override
   Widget build(BuildContext context) {
@@ -13,10 +16,16 @@ class WallpaperPickerPage extends StatelessWidget {
     return GlassBackground(
       child: Scaffold(
         backgroundColor: Colors.transparent,
-        appBar: AppBar(title: const Text('Chat wallpaper')),
+        appBar: AppBar(
+          title: Text(chatId == null
+              ? 'Chat wallpaper'
+              : 'Wallpaper for this chat'),
+        ),
         body: ValueListenableBuilder<ChatWallpaper>(
           valueListenable: BackgroundController.instance,
-          builder: (context, selected, _) {
+          builder: (context, _, __) {
+            final selected =
+                BackgroundController.instance.forChat(chatId);
             return GridView.count(
               padding: const EdgeInsets.all(16),
               crossAxisCount: 2,
@@ -28,6 +37,7 @@ class WallpaperPickerPage extends StatelessWidget {
                   _WallpaperCard(
                     wallpaper: wallpaper,
                     selected: selected.asset == wallpaper.asset,
+                    chatId: chatId,
                   ),
               ],
             );
@@ -39,16 +49,23 @@ class WallpaperPickerPage extends StatelessWidget {
 }
 
 class _WallpaperCard extends StatelessWidget {
-  const _WallpaperCard({required this.wallpaper, required this.selected});
+  const _WallpaperCard({
+    required this.wallpaper,
+    required this.selected,
+    this.chatId,
+  });
 
   final ChatWallpaper wallpaper;
   final bool selected;
+  final String? chatId;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return GestureDetector(
-      onTap: () => BackgroundController.instance.select(wallpaper),
+      onTap: () => chatId == null
+          ? BackgroundController.instance.select(wallpaper)
+          : BackgroundController.instance.selectForChat(chatId!, wallpaper),
       child: Container(
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(18),

@@ -25,6 +25,7 @@ class Broker {
 }
 
 const presenceTopicPrefix = 'chatnyto/presence';
+const chatTopicPrefix = 'chatnyto/chat';
 
 /// Keeps the user's broker list (add by name / remove), manages one MQTT
 /// connection per broker, and advertises the user's public identity on the
@@ -40,6 +41,10 @@ class BrokerService extends ChangeNotifier {
   final Map<String, MqttServerClient> _clients = {};
   final Map<String, PublicIdentity> _peers = {};
   bool _loaded = false;
+
+  /// Invoked for every message arriving on `chatnyto/chat/#` of any
+  /// connected broker. Set by the chat messenger.
+  void Function(String topic, String payload)? onChatMessage;
 
   List<Broker> get brokers => List.unmodifiable(_brokers);
   List<PublicIdentity> get peers => List.unmodifiable(_peers.values);
@@ -100,11 +105,21 @@ class BrokerService extends ChangeNotifier {
     _clients[broker.name] = client;
 
     client.subscribe('$presenceTopicPrefix/#', MqttQos.atLeastOnce);
+    client.subscribe('$chatTopicPrefix/#', MqttQos.atLeastOnce);
     client.updates!.listen((events) async {
       for (final event in events) {
-        if (!event.topic.startsWith(presenceTopicPrefix)) continue;
         final payload = event.payload;
         if (payload is! MqttPublishMessage) continue;
+        if (event.topic.startsWith(chatTopicPrefix)) {
+          try {
+            onChatMessage?.call(
+                event.topic, utf8.decode(payload.payload.message));
+          } catch (_) {
+            // Ignore undecodable chat payloads.
+          }
+          continue;
+        }
+        if (!event.topic.startsWith(presenceTopicPrefix)) continue;
         try {
           final json = jsonDecode(utf8.decode(payload.payload.message))
               as Map<String, dynamic>;
@@ -153,6 +168,39 @@ class BrokerService extends ChangeNotifier {
   Future<void> advertiseEverywhere() async {
     for (final broker in _brokers) {
       await advertiseIdentity(broker);
+    }
+  }
+
+  /// Publishes [payload] on [topic] over every connected broker — the
+  /// caller never needs to know which broker carries the message.
+  void publishToAll(String topic, String payload) {
+    final builder = MqttClientPayloadBuilder()..addString(payload);
+    for (final client in _clients.values) {
+      if (client.connectionStatus?.state == MqttConnectionState.connected) {
+        client.publishMessage(topic, MqttQos.atLeastOnce, builder.payload!);
+      }
+    }
+  }
+
+  bool get anyConnected => _brokers.any(isConnected);
+
+  /// First-run defaults so non-technical users never configure brokers:
+  /// the Heltec LoRa broker's access-point address and this device.
+  Future<void> ensureDefaults() async {
+    await load();
+    if (_brokers.isNotEmpty) return;
+    await addBroker(Broker(name: 'Local LoRa network', host: '192.168.4.1'));
+    await addBroker(Broker(name: 'This device', host: '127.0.0.1'));
+  }
+
+  /// Tries to connect every registered broker; failures are silent so the
+  /// app keeps working with whichever network is reachable.
+  Future<void> autoConnectAll() async {
+    await load();
+    for (final broker in List<Broker>.from(_brokers)) {
+      if (!isConnected(broker)) {
+        await connect(broker);
+      }
     }
   }
 }
