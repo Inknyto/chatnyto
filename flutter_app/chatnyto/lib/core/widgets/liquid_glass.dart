@@ -2,6 +2,7 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 
 import '../theme/background_controller.dart';
+import '../theme/glass_controller.dart';
 
 /// Frosted, translucent container used across the app for the
 /// "liquid glass" design language.
@@ -26,35 +27,42 @@ class LiquidGlass extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final tint = isDark ? Colors.white : Colors.white;
-    final surfaceOpacity = opacity ?? (isDark ? 0.08 : 0.45);
-    return Padding(
-      padding: margin,
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(radius),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: blur, sigmaY: blur),
-          child: Container(
-            padding: padding,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(radius),
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [
-                  tint.withOpacity(surfaceOpacity + 0.08),
-                  tint.withOpacity(surfaceOpacity),
-                ],
-              ),
-              border: Border.all(
-                color: tint.withOpacity(isDark ? 0.15 : 0.6),
-                width: 1,
+    const tint = Colors.white;
+    GlassController.instance.load();
+    return ValueListenableBuilder<double>(
+      valueListenable: GlassController.instance,
+      builder: (context, _, __) {
+        final glass = GlassController.instance;
+        final surfaceOpacity = opacity ?? glass.surfaceOpacity(isDark);
+        return Padding(
+          padding: margin,
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(radius),
+            child: BackdropFilter(
+              filter: ImageFilter.blur(sigmaX: blur, sigmaY: blur),
+              child: Container(
+                padding: padding,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(radius),
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [
+                      tint.withOpacity((surfaceOpacity + 0.08).clamp(0.0, 1.0)),
+                      tint.withOpacity(surfaceOpacity),
+                    ],
+                  ),
+                  border: Border.all(
+                    color: tint.withOpacity(glass.borderOpacity(isDark)),
+                    width: 1,
+                  ),
+                ),
+                child: child,
               ),
             ),
-            child: child,
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 }

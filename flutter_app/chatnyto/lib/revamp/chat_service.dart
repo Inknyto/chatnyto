@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/brokers/broker_service.dart';
 import '../core/crypto/crypto_service.dart';
+import '../core/notifications/notification_service.dart';
 
 /// One conversation: a direct message with a verified person, or a named
 /// group. Brokers are invisible here — messages travel over whichever
@@ -20,23 +21,41 @@ class ChatEntry {
     required this.topic,
     this.peer,
     this.secret = '',
+    this.creatorKey = '',
+    List<String>? admins,
     this.lastMessage = '',
     this.lastTs = 0,
     this.unread = 0,
-  });
+  }) : admins = admins ?? [];
 
-  final String id; // 'dm:<fingerprint>' or 'group:<slug>'
+  String id; // 'dm:<fingerprint>' or 'group:<slug>'
   final String kind; // 'dm' | 'group'
   String title;
-  final String topic;
+
+  /// MQTT topic the conversation travels on. Renaming a group changes it,
+  /// which is why it is not final.
+  String topic;
   final Map<String, dynamic>? peer; // PublicIdentity json for DMs
   final String secret; // optional group passphrase
+
+  /// Base64 Ed25519 public key of the group's creator. Only messages signed
+  /// with the matching private key may rename or delete the group, or
+  /// change who else can.
+  String creatorKey;
+
+  /// Base64 Ed25519 public keys the creator designated as admins. They can
+  /// rename and delete the group too, but not change this list.
+  List<String> admins;
+
   String lastMessage;
   int lastTs;
   int unread;
 
   bool get isDm => kind == 'dm';
   bool get isPublicGroup => kind == 'group' && secret.isEmpty;
+
+  String get slug =>
+      id.startsWith('group:') ? id.substring('group:'.length) : '';
 
   PublicIdentity? get peerIdentity =>
       peer == null ? null : PublicIdentity.fromJson(peer!);
@@ -48,6 +67,8 @@ class ChatEntry {
         'topic': topic,
         'peer': peer,
         'secret': secret,
+        'creator': creatorKey,
+        'admins': admins,
         'last': lastMessage,
         'ts': lastTs,
         'unread': unread,
@@ -62,28 +83,47 @@ class ChatEntry {
             ? null
             : Map<String, dynamic>.from(json['peer']),
         secret: json['secret'] ?? '',
+        creatorKey: json['creator'] ?? '',
+        admins: json['admins'] == null
+            ? null
+            : List<String>.from(json['admins']),
         lastMessage: json['last'] ?? '',
         lastTs: (json['ts'] as num?)?.toInt() ?? 0,
         unread: (json['unread'] as num?)?.toInt() ?? 0,
       );
 }
 
-/// A plain-text chat message (revamp UX keeps messaging simple).
+/// A chat message. [text] is always the plain-text form (used for previews
+/// and for clients that don't render rich text); [delta] carries the Quill
+/// document when the message was written with formatting.
 class RevampMessage {
   RevampMessage({
     required this.from,
     required this.name,
     required this.text,
     required this.ts,
+    this.delta,
+    this.image,
   });
 
   final String from; // sender fingerprint ('' when anonymous)
   final String name;
   final String text;
   final int ts;
+  final List<dynamic>? delta; // Quill delta operations, when formatted
+  final String? image; // base64 JPEG attachment
 
-  Map<String, dynamic> toJson() =>
-      {'f': from, 'n': name, 't': text, 'ts': ts};
+  bool get isRich => delta != null && delta!.isNotEmpty;
+  bool get hasImage => image != null && image!.isNotEmpty;
+
+  Map<String, dynamic> toJson() => {
+        'f': from,
+        'n': name,
+        't': text,
+        'ts': ts,
+        if (isRich) 'd': delta,
+        if (hasImage) 'img': image,
+      };
 
   static RevampMessage? fromJson(Map<String, dynamic> json) {
     try {
@@ -93,6 +133,8 @@ class RevampMessage {
         name: json['n'] ?? '',
         text: json['t'] ?? '',
         ts: (json['ts'] as num?)?.toInt() ?? 0,
+        delta: json['d'] == null ? null : List<dynamic>.from(json['d']),
+        image: json['img'] as String?,
       );
     } catch (_) {
       return null;
@@ -277,24 +319,39 @@ class ChatService extends ChangeNotifier {
     return chat;
   }
 
+  static String _slugify(String name) => name
+      .toLowerCase()
+      .trim()
+      .replaceAll(RegExp(r'[^a-z0-9]+'), '-')
+      .replaceAll(RegExp(r'^-+|-+$'), '');
+
   /// Creates (or opens) a group chat; anyone entering the same name (and
   /// passphrase, if set) joins the same encrypted room. Public groups
   /// (no passphrase) are advertised on the mesh for discovery.
-  Future<ChatEntry> createGroup(String name, {String secret = ''}) async {
-    final slug = name
-        .toLowerCase()
-        .trim()
-        .replaceAll(RegExp(r'[^a-z0-9]+'), '-')
-        .replaceAll(RegExp(r'^-+|-+$'), '');
+  ///
+  /// [creatorKey] is the Ed25519 public key of the group's owner: our own
+  /// when we create the group, the advertised one when we join a group
+  /// discovered on the mesh. Only that key may later rename or delete it.
+  Future<ChatEntry> createGroup(
+    String name, {
+    String secret = '',
+    String? creatorKey,
+  }) async {
+    final slug = _slugify(name);
     final id = 'group:$slug';
     final existing = _chats.where((c) => c.id == id).firstOrNull;
     if (existing != null) return existing;
+    var owner = creatorKey ?? '';
+    if (creatorKey == null && IdentityService.instance.isUnlocked) {
+      owner = await IdentityService.instance.ed25519PublicKeyB64();
+    }
     final chat = ChatEntry(
       id: id,
       kind: 'group',
       title: name.trim(),
       topic: '$chatTopicPrefix/group/$slug',
       secret: secret,
+      creatorKey: owner,
     );
     _chats.add(chat);
     await _saveChats();
@@ -305,11 +362,155 @@ class ChatService extends ChangeNotifier {
     return chat;
   }
 
-  Future<void> renameChat(ChatEntry chat, String title) async {
-    if (title.trim().isEmpty) return;
-    chat.title = title.trim();
+  /// Joins a group discovered on the mesh, recording its advertised owner.
+  Future<ChatEntry> joinPublicGroup(PublicGroupAd ad) =>
+      createGroup(ad.name, creatorKey: ad.creatorKey);
+
+  /// True when this device holds the key the group was created with. Only
+  /// the creator may appoint admins.
+  Future<bool> isGroupOwner(ChatEntry chat) async {
+    if (chat.isDm || chat.creatorKey.isEmpty) return false;
+    if (!IdentityService.instance.isUnlocked) return false;
+    return await IdentityService.instance.ed25519PublicKeyB64() ==
+        chat.creatorKey;
+  }
+
+  /// True for the creator and for anyone the creator made an admin — the
+  /// people allowed to rename the group or delete it for everyone.
+  Future<bool> canAdministerGroup(ChatEntry chat) async {
+    if (chat.isDm || chat.creatorKey.isEmpty) return false;
+    if (!IdentityService.instance.isUnlocked) return false;
+    final mine = await IdentityService.instance.ed25519PublicKeyB64();
+    return mine == chat.creatorKey || chat.admins.contains(mine);
+  }
+
+  /// Replaces the group's admin list and tells the members. Creator only.
+  Future<String?> setGroupAdmins(ChatEntry chat, List<String> admins) async {
+    if (!await isGroupOwner(chat)) {
+      return 'Only the person who created this group can choose its admins.';
+    }
+    chat.admins = List<String>.from(admins);
     await _saveChats();
+    await _publishGroupControl(
+      topic: chat.topic,
+      secret: chat.secret,
+      type: 'group_admins',
+      extra: {'admins': chat.admins},
+      canonical: 'group_admins:${chat.slug}:${chat.admins.join(',')}',
+    );
     notifyListeners();
+    return null;
+  }
+
+  /// Renames a chat. For a DM the title is a local label, so it just
+  /// changes here. For a group the name defines the topic, so renaming
+  /// moves the conversation to a new topic and tells the members — and
+  /// only the creator may do it.
+  Future<String?> renameChat(ChatEntry chat, String title) async {
+    final trimmed = title.trim();
+    if (trimmed.isEmpty) return 'Please enter a name.';
+    if (chat.isDm) {
+      chat.title = trimmed;
+      await _saveChats();
+      notifyListeners();
+      return null;
+    }
+    if (!await canAdministerGroup(chat)) {
+      return 'Only the creator or an admin of this group can rename it.';
+    }
+    final newSlug = _slugify(trimmed);
+    if (newSlug.isEmpty) return 'That name cannot be used.';
+    if (newSlug != chat.slug && _chats.any((c) => c.id == 'group:$newSlug')) {
+      return 'You already have a group with that name.';
+    }
+    final oldSlug = chat.slug;
+    final oldTopic = chat.topic;
+
+    if (newSlug != oldSlug) {
+      // Tell the members on the topic they are still listening on, before
+      // moving over: the payload is encrypted with the old channel key and
+      // signed with the creator key they recorded when they joined.
+      await _publishGroupControl(
+        topic: oldTopic,
+        secret: chat.secret,
+        type: 'group_rename',
+        extra: {'slug': newSlug, 'name': trimmed},
+        canonical: 'group_rename:$oldSlug:$newSlug:$trimmed',
+      );
+      await _moveChatStorage(chat, 'group:$newSlug');
+      chat.topic = '$chatTopicPrefix/group/$newSlug';
+      // Withdraw the old public announcement so nobody joins the dead name.
+      if (chat.isPublicGroup) BrokerService.instance.clearGroupAd(oldSlug);
+    }
+    chat.title = trimmed;
+    await _saveChats();
+    announcePublicGroups();
+    notifyListeners();
+    return null;
+  }
+
+  /// Deletes a group for everyone. Only the creator can do this; members
+  /// receive a signed instruction and drop the conversation.
+  Future<String?> deleteGroupForEveryone(ChatEntry chat) async {
+    if (chat.isDm) return 'This is not a group.';
+    if (!await canAdministerGroup(chat)) {
+      return 'Only the creator or an admin of this group can delete it for '
+          'everyone.';
+    }
+    await _publishGroupControl(
+      topic: chat.topic,
+      secret: chat.secret,
+      type: 'group_delete',
+      extra: const {},
+      canonical: 'group_delete:${chat.slug}',
+    );
+    if (chat.isPublicGroup) BrokerService.instance.clearGroupAd(chat.slug);
+    await removeChat(chat);
+    return null;
+  }
+
+  /// Publishes a signed, encrypted control message on a group topic.
+  Future<void> _publishGroupControl({
+    required String topic,
+    required String secret,
+    required String type,
+    required Map<String, dynamic> extra,
+    required String canonical,
+  }) async {
+    if (!IdentityService.instance.isUnlocked) return;
+    final key = await MessageCrypto.deriveChannelKey(secret, topic);
+    final ts = DateTime.now().millisecondsSinceEpoch;
+    final message = '$canonical:$ts';
+    final envelope = await MessageCrypto.encryptEnvelope(
+      jsonEncode({
+        'type': type,
+        ...extra,
+        'ts': ts,
+        'by': await IdentityService.instance.ed25519PublicKeyB64(),
+        'sig': await IdentityService.instance.signPayload(message),
+      }),
+      key,
+    );
+    BrokerService.instance.publishToAll(topic, envelope);
+  }
+
+  /// Moves a chat's stored history to a new id (used when a group rename
+  /// changes its topic).
+  Future<void> _moveChatStorage(ChatEntry chat, String newId) async {
+    final oldId = chat.id;
+    if (oldId == newId) return;
+    final messages = await messagesFor(chat);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('$_encMsgsKeyPrefix$oldId');
+    await prefs.remove('$_legacyMsgsKeyPrefix$oldId');
+    _messages.remove(oldId);
+    for (final item in _outbox) {
+      if (item['chat'] == oldId) item['chat'] = newId;
+    }
+    chat.id = newId;
+    _messages[newId] = messages;
+    await _saveMessages(chat);
+    await _saveOutbox();
   }
 
   Future<void> removeChat(ChatEntry chat) async {
@@ -333,10 +534,11 @@ class ChatService extends ChangeNotifier {
 
   // ------------------------------------------------------------ messaging
 
-  /// Sends [text] to [chat]. Works offline: the message lands in the chat
-  /// immediately and waits in the encrypted outbox until a broker is
-  /// reachable.
-  Future<bool> sendText(ChatEntry chat, String text) async {
+  /// Sends [text] to [chat], optionally with Quill formatting in [delta].
+  /// Works offline: the message lands in the chat immediately and waits in
+  /// the encrypted outbox until a broker is reachable.
+  Future<bool> sendText(ChatEntry chat, String text,
+      {List<dynamic>? delta, String? image}) async {
     final key = await _keyFor(chat);
     if (key == null) return false;
     String from = '';
@@ -351,6 +553,8 @@ class ChatService extends ChangeNotifier {
       name: name,
       text: text,
       ts: DateTime.now().millisecondsSinceEpoch,
+      delta: delta,
+      image: image,
     );
     await _append(chat, message, countUnread: false);
     if (BrokerService.instance.anyConnected) {
@@ -383,12 +587,14 @@ class ChatService extends ChangeNotifier {
     await _saveOutbox();
   }
 
-  Future<void> _append(ChatEntry chat, RevampMessage message,
+  /// Adds [message] to the chat; returns false when it was a duplicate
+  /// (echo or replay) and nothing changed.
+  Future<bool> _append(ChatEntry chat, RevampMessage message,
       {required bool countUnread}) async {
     final list = await messagesFor(chat);
     final duplicate =
         list.any((m) => m.ts == message.ts && m.from == message.from);
-    if (duplicate) return;
+    if (duplicate) return false;
     list.add(message);
     list.sort((a, b) => a.ts.compareTo(b.ts));
     if (message.ts >= chat.lastTs) {
@@ -399,6 +605,7 @@ class ChatService extends ChangeNotifier {
     await _saveMessages(chat);
     await _saveChats();
     notifyListeners();
+    return true;
   }
 
   void markRead(ChatEntry chat) {
@@ -433,10 +640,16 @@ class ChatService extends ChangeNotifier {
   void announcePublicGroups() {
     if (!BrokerService.instance.anyConnected) return;
     for (final chat in _chats.where((c) => c.isPublicGroup)) {
-      final slug = chat.id.substring('group:'.length);
       BrokerService.instance.publishToAll(
-        '$groupsTopicPrefix/$slug',
-        jsonEncode({'slug': slug, 'name': chat.title}),
+        '$groupsTopicPrefix/${chat.slug}',
+        jsonEncode({
+          'slug': chat.slug,
+          'name': chat.title,
+          'creator': chat.creatorKey,
+        }),
+        // Retained, so someone joining the network later still discovers
+        // the group without waiting for the next heartbeat.
+        retain: true,
       );
     }
   }
@@ -521,6 +734,12 @@ class ChatService extends ChangeNotifier {
       _replayHistory(chat, since);
       return;
     }
+    if (data['type'] == 'group_rename' ||
+        data['type'] == 'group_delete' ||
+        data['type'] == 'group_admins') {
+      await _applyGroupControl(chat, data);
+      return;
+    }
     final message = RevampMessage.fromJson(data);
     if (message == null) return;
     String myFp = '';
@@ -532,6 +751,77 @@ class ChatService extends ChangeNotifier {
       await _append(chat, message, countUnread: false);
       return;
     }
-    await _append(chat, message, countUnread: true);
+    final isNew = await _append(chat, message, countUnread: true);
+    if (isNew) {
+      await NotificationService.instance.showMessage(
+        chatId: chat.id,
+        chatTitle: chat.title,
+        sender: chat.isDm ? '' : message.name,
+        preview: message.text,
+      );
+    }
+  }
+
+  /// Applies a rename/delete/admin instruction, but only when it is signed
+  /// by the group's creator (or, for rename and delete, by an admin the
+  /// creator appointed). Anyone holding the channel key could otherwise
+  /// forge one.
+  Future<void> _applyGroupControl(
+      ChatEntry chat, Map<String, dynamic> data) async {
+    if (chat.isDm) return;
+    final by = data['by'] as String? ?? '';
+    final sig = data['sig'] as String? ?? '';
+    final ts = (data['ts'] as num?)?.toInt() ?? 0;
+    if (by.isEmpty || sig.isEmpty) return;
+    if (chat.creatorKey.isEmpty) {
+      // We joined before owners were recorded: trust the first signed
+      // instruction we see and pin that key from now on.
+      chat.creatorKey = by;
+    }
+    final fromCreator = chat.creatorKey == by;
+    final fromAdmin = chat.admins.contains(by);
+    if (!fromCreator && !fromAdmin) return;
+
+    if (data['type'] == 'group_admins') {
+      // Only the creator decides who administers the group.
+      if (!fromCreator) return;
+      final admins = data['admins'] == null
+          ? <String>[]
+          : List<String>.from(data['admins']);
+      final ok = await IdentityService.verifyPayload(
+          'group_admins:${chat.slug}:${admins.join(',')}:$ts', sig, by);
+      if (!ok) return;
+      chat.admins = admins;
+      await _saveChats();
+      notifyListeners();
+      return;
+    }
+
+    if (data['type'] == 'group_delete') {
+      final ok = await IdentityService.verifyPayload(
+          'group_delete:${chat.slug}:$ts', sig, by);
+      if (!ok) return;
+      await removeChat(chat);
+      return;
+    }
+
+    final newName = (data['name'] as String? ?? '').trim();
+    final newSlug = data['slug'] as String? ?? '';
+    if (newName.isEmpty || newSlug.isEmpty) return;
+    final ok = await IdentityService.verifyPayload(
+        'group_rename:${chat.slug}:$newSlug:$newName:$ts', sig, by);
+    if (!ok) return;
+    if (newSlug != chat.slug) {
+      if (_chats.any((c) => c.id == 'group:$newSlug' && c.id != chat.id)) {
+        // Already following the renamed group: drop the stale entry.
+        await removeChat(chat);
+        return;
+      }
+      await _moveChatStorage(chat, 'group:$newSlug');
+      chat.topic = '$chatTopicPrefix/group/$newSlug';
+    }
+    chat.title = newName;
+    await _saveChats();
+    notifyListeners();
   }
 }

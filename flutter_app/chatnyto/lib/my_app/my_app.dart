@@ -1,10 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_quill/flutter_quill.dart';
 
+import '../core/brokers/broker_service.dart';
 import '../core/crypto/crypto_service.dart';
+import '../core/crypto/password_vault.dart';
+import '../core/notifications/notification_service.dart';
 import '../core/theme/app_theme.dart';
+import '../core/theme/glass_controller.dart';
 import '../core/theme/theme_controller.dart';
 import '../core/widgets/liquid_glass.dart';
+import '../revamp/chat_service.dart';
 import '../revamp/home_shell.dart';
 import '../revamp/onboarding.dart';
 import 'app_drawer.dart';
@@ -16,11 +21,36 @@ class MyApp extends StatefulWidget {
   State<MyApp> createState() => _MyAppState();
 }
 
-class _MyAppState extends State<MyApp> {
+class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     ThemeController.instance.load();
+    GlassController.instance.load();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  /// The broker connections and their heartbeat are deliberately left
+  /// running when the app goes to the background, so messages keep arriving
+  /// (and raise notifications). Coming back to the foreground is the moment
+  /// to repair whatever the OS tore down while we were away.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    NotificationService.instance.appInForeground =
+        state == AppLifecycleState.resumed;
+    if (state == AppLifecycleState.resumed &&
+        IdentityService.instance.isUnlocked) {
+      BrokerService.instance.autoConnectAll().then((_) async {
+        await BrokerService.instance.advertiseEverywhere();
+        await ChatService.instance.syncAll();
+      });
+    }
   }
 
   @override
@@ -44,30 +74,56 @@ class _MyAppState extends State<MyApp> {
   }
 }
 
-/// Decides the start screen: onboarding on first run, unlock for
-/// returning users, otherwise straight to the chats.
-class _Entry extends StatelessWidget {
+/// What the app should show at start-up.
+enum _Start { onboarding, unlock, home }
+
+/// Decides the start screen: onboarding on first run, the chats when the
+/// identity could be unlocked with the remembered password, otherwise the
+/// unlock screen.
+class _Entry extends StatefulWidget {
   const _Entry();
 
   @override
+  State<_Entry> createState() => _EntryState();
+}
+
+class _EntryState extends State<_Entry> {
+  // Resolved once: rebuilds (a theme toggle, for instance) must not send
+  // the user back through the unlock decision.
+  late final Future<_Start> _start = _decide();
+
+  static Future<_Start> _decide() async {
+    if (!await IdentityService.instance.exists()) return _Start.onboarding;
+    if (!IdentityService.instance.isUnlocked &&
+        !await PasswordVault.instance.tryAutoUnlock()) {
+      return _Start.unlock;
+    }
+    // Networks, chat sync and notifications start before the first frame of
+    // the home screen, not as a side effect of building it.
+    await startRevampServices();
+    return _Start.home;
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return FutureBuilder<bool>(
-      future: IdentityService.instance.exists(),
+    return FutureBuilder<_Start>(
+      future: _start,
       builder: (context, snapshot) {
-        if (!snapshot.hasData) {
-          return const GlassBackground(
-            child: Scaffold(
-              backgroundColor: Colors.transparent,
-              body: Center(child: CircularProgressIndicator()),
-            ),
-          );
+        switch (snapshot.data) {
+          case null:
+            return const GlassBackground(
+              child: Scaffold(
+                backgroundColor: Colors.transparent,
+                body: Center(child: CircularProgressIndicator()),
+              ),
+            );
+          case _Start.onboarding:
+            return const WelcomeScreen();
+          case _Start.unlock:
+            return const UnlockScreen();
+          case _Start.home:
+            return const HomeShell();
         }
-        if (!snapshot.data!) return const WelcomeScreen();
-        if (!IdentityService.instance.isUnlocked) {
-          return const UnlockScreen();
-        }
-        startRevampServices();
-        return const HomeShell();
       },
     );
   }

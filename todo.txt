@@ -142,3 +142,86 @@ Done:     on MQTT CONNECT (and a CONNACK refusal is treated as a failed
 Done:     connection), and the add/edit broker dialog on the Networks page has
 Done:     optional Username/Password fields. Works with the ESP32 broker's
 Done:     BROKER_AUTHENTICATION option and any mosquitto with password_file.
+Done: [x] DONE - Renaming a group renames its topic, and only its creator or an admin
+Done:     he designated can do it: groups record the creator's Ed25519 public key (set when
+Done:     created, taken from the group announcement when joining a discovered one) plus an
+Done:     admin list the creator controls. ChatService.renameChat re-slugs the name, publishes
+Done:     a signed 'group_rename' control message encrypted with the OLD channel key so members
+Done:     can still read it, moves the local encrypted history to the new id, switches the topic
+Done:     to chatnyto/chat/group/<new-slug> and withdraws the old retained announcement. Members
+Done:     apply it only if the signature verifies against the creator key or a recorded admin
+Done:     key; the creator appoints admins from the chat menu ("Group admins"), sent as a signed
+Done:     'group_admins' message that only the creator may issue.
+Done: [x] DONE - Background connections, notifications (with an off switch and a chosen
+Done:     sound), persistent brokers, an auto-connect option, and discovery of the brokers on
+Done:     the current network:
+Done:     * Notifications: flutter_local_notifications raises a system notification for every
+Done:       message arriving while its chat is not on screen or the app is in the background
+Done:       (lib/core/notifications/notification_service.dart; Android POST_NOTIFICATIONS
+Done:       permission + core library desugaring). Settings -> Notifications has an on/off
+Done:       switch and a sound picker - a bundled two-note chime generated into
+Done:       android/app/src/main/res/raw/chatnyto_chime.wav, the system default, or silent
+Done:       (one Android channel per sound, since a channel's sound is immutable). Picking a
+Done:       sound plays it so it can be heard.
+Done:     * Background: broker connections and the 30s heartbeat are never torn down when the
+Done:       app is backgrounded, and returning to the foreground reconnects, re-advertises
+Done:       presence and re-syncs (WidgetsBindingObserver in my_app.dart).
+Done:     * Persistent connections: every broker carries an autoConnect flag persisted with the
+Done:       broker list, so a network switched on or off stays that way across restarts, plus a
+Done:       master "Connect automatically" switch on the Networks page and in Settings.
+Done:     * Discovery: BrokerService.discoverLocalBrokers scans every subnet the device is on
+Done:       (plus the Heltec AP range 192.168.4.x) and confirms each candidate with a real MQTT
+Done:       CONNECT/CONNACK handshake rather than just an open port; "Find brokers on this
+Done:       network" lists what it finds for one-tap joining.
+Add a configuration option to the broker to set it to public or private.
+You can create services for the app to keep getting the messages even after you
+restart the app, or you are not currently using the app.
+Done: [x] DONE - Profile picture support: Settings -> Profile has a picture tile (pick,
+Done:     replace, remove). The image is downscaled to 128px JPEG, stored locally and advertised
+Done:     with the identity — and it is covered by the Ed25519 signature (the signed message
+Done:     becomes name:key:sha256(picture)), so nobody can put another face on a verified
+Done:     identity. Pictures show in the People tab, the chat list and chat headers. Identities
+Done:     published without a picture still verify against the original name:key form.
+Done: [x] DONE - The new chat types support Quill editing like the old ones, with images:
+Done:     the composer is a Quill editor with a toggleable formatting toolbar (bold, italic,
+Done:     underline, strikethrough, colours, lists, quote, code); messages carry the Quill delta
+Done:     next to their plain text and render read-only with the formatting. The attach button
+Done:     sends a picture (shrunk to 720px JPEG and hard-capped, so one photo cannot monopolise
+Done:     a LoRa link) inside the same end-to-end encrypted envelope, using whatever is typed as
+Done:     its caption. Unformatted, image-less messages stay plain text so nothing extra
+Done:     travels.
+Done: [x] DONE - Liquid glass opacity: resting surfaces were too transparent, so the
+Done:     default is now the denser shade that scrolling elements had, and Settings ->
+Done:     Preferences -> Glass opacity is a persistent slider (GlassController) driving every
+Done:     panel, bubble, bar and border across the app.
+Make the app customizable.
+Done: [x] DONE - The password is remembered by default in the platform keystore (Android
+Done:     EncryptedSharedPreferences / Keychain / libsecret / DPAPI via flutter_secure_storage,
+Done:     lib/core/crypto/password_vault.dart) so the app opens straight into the chats. The
+Done:     unlock screen has a "Remember me" checkbox, and Settings -> Security -> "Ask password
+Done:     at every app open" turns remembering off and wipes the stored copy.
+Done: [x] DONE - Groups (topics) we created can be deleted: the creator and the admins he
+Done:     designated get "Delete group for everyone" (chat menu and long-press), which publishes
+Done:     a signed 'group_delete' control message and clears the retained announcement; members
+Done:     verify the signature against the recorded creator/admin keys and drop the
+Done:     conversation. Everyone else only gets "Leave group", which removes it locally.
+You have to configure these files on this server for remote deployment. Here are the
+deployment scripts of an app already running on that same server: @deploy/ . You have to securely
+deploy a production level mqtt broker and make the app able to use it by entering the url of
+the current running app: supa-tech.com .
+Done: [x] DONE - Connection status (connected/disconnected) like the old app:
+Done:     ConnectionStatusChip (lib/core/widgets/connection_status.dart) shows a live coloured
+Done:     dot in the home app bar and a dot plus wording under the name in the chat header,
+Done:     updating with the brokers.
+The old app files are in the comunities tab.
+Add full english/french support for the entire app via i18n
+Show the networks in a network graph, in addition of the existing view.
+Add broker connection via a scannable QR code.
+Get a nice logo for the app, that symbolizes what it does. The app connects humans, robots
+and AIs to mage great things. 
+You have to develop the AI part of the app.
+Add mcp support and tools(skills). Research all current available AI APIs and add main AI
+providers as AI providers via BYOK (Bring Your Own Key).
+Think UI/UX first in any changes you make.
+If you have questions, do not write the code yet. Ask them first. If you do not have
+questions, write the complete code.

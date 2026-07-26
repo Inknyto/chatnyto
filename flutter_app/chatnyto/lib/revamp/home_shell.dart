@@ -1,3 +1,4 @@
+// ~/Documents/git/chatnyto/flutter_app/chatnyto/lib/revamp/home_shell.dart 26 Jul 2026 at 02:33:16 PM
 import 'package:flutter/material.dart';
 
 import '../account/account_page.dart';
@@ -8,6 +9,7 @@ import '../core/brokers/brokers_page.dart';
 import '../core/crypto/crypto_service.dart';
 import '../core/settings/wallpaper_picker.dart';
 import '../core/theme/theme_controller.dart';
+import '../core/widgets/connection_status.dart';
 import '../core/widgets/liquid_glass.dart';
 import '../core/widgets/wa_components.dart';
 import '../humans/humans_page.dart';
@@ -40,6 +42,7 @@ class _HomeShellState extends State<HomeShell> {
             style: const TextStyle(fontWeight: FontWeight.bold),
           ),
           actions: [
+            const ConnectionStatusChip(compact: true),
             IconButton(
               tooltip: 'Toggle dark/light mode',
               icon: Icon(
@@ -67,7 +70,7 @@ class _HomeShellState extends State<HomeShell> {
                 PopupMenuItem(
                     value: 'security', child: Text('Security & identity')),
                 PopupMenuItem(
-                    value: 'brokers', child: Text('Networks (advanced)')),
+                    value: 'brokers', child: Text('Networks')),
               ],
             ),
           ],
@@ -190,8 +193,12 @@ class _ChatsTabState extends State<ChatsTab> {
     }
   }
 
-  /// Long-press edit mode: rename, per-chat wallpaper, delete.
-  void _showChatOptions(ChatEntry chat) {
+  /// Long-press edit mode: rename, per-chat wallpaper, delete. Renaming a
+  /// group and deleting it for everyone are reserved to its creator.
+  Future<void> _showChatOptions(ChatEntry chat) async {
+    final isOwner = await _service.canAdministerGroup(chat);
+    final canRename = chat.isDm || isOwner;
+    if (!mounted) return;
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
@@ -201,36 +208,58 @@ class _ChatsTabState extends State<ChatsTab> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            ListTile(
-              leading: const Icon(Icons.edit_rounded),
-              title: const Text('Rename'),
-              onTap: () async {
-                Navigator.pop(sheetContext);
-                final controller =
-                    TextEditingController(text: chat.title);
-                final saved = await showDialog<bool>(
-                  context: context,
-                  builder: (context) => AlertDialog(
-                    title: const Text('Rename chat'),
-                    content: TextField(
-                        controller: controller, autofocus: true),
-                    actions: [
-                      TextButton(
-                        onPressed: () => Navigator.pop(context, false),
-                        child: const Text('Cancel'),
+            if (canRename)
+              ListTile(
+                leading: const Icon(Icons.edit_rounded),
+                title: Text(chat.isDm ? 'Rename' : 'Rename group'),
+                subtitle: chat.isDm
+                    ? null
+                    : const Text('Also moves the group to a new address'),
+                onTap: () async {
+                  Navigator.pop(sheetContext);
+                  final controller =
+                      TextEditingController(text: chat.title);
+                  final saved = await showDialog<bool>(
+                    context: context,
+                    builder: (context) => AlertDialog(
+                      title: Text(
+                          chat.isDm ? 'Rename chat' : 'Rename group'),
+                      content: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          TextField(
+                              controller: controller, autofocus: true),
+                          if (!chat.isDm) ...[
+                            const SizedBox(height: 8),
+                            const Text(
+                              'The name is the group\'s address on the '
+                              'network — everyone follows it automatically.',
+                              style: TextStyle(fontSize: 12),
+                            ),
+                          ],
+                        ],
                       ),
-                      FilledButton(
-                        onPressed: () => Navigator.pop(context, true),
-                        child: const Text('Save'),
-                      ),
-                    ],
-                  ),
-                );
-                if (saved == true) {
-                  _service.renameChat(chat, controller.text);
-                }
-              },
-            ),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(context, false),
+                          child: const Text('Cancel'),
+                        ),
+                        FilledButton(
+                          onPressed: () => Navigator.pop(context, true),
+                          child: const Text('Save'),
+                        ),
+                      ],
+                    ),
+                  );
+                  if (saved != true) return;
+                  final error =
+                      await _service.renameChat(chat, controller.text);
+                  if (error != null && mounted) {
+                    ScaffoldMessenger.of(context)
+                        .showSnackBar(SnackBar(content: Text(error)));
+                  }
+                },
+              ),
             ListTile(
               leading: const Icon(Icons.wallpaper_rounded),
               title: const Text('Wallpaper for this chat'),
@@ -243,16 +272,55 @@ class _ChatsTabState extends State<ChatsTab> {
                 );
               },
             ),
+            if (isOwner)
+              ListTile(
+                leading: const Icon(Icons.group_remove_rounded,
+                    color: Colors.redAccent),
+                title: const Text('Delete group for everyone'),
+                subtitle: const Text('You administer this group'),
+                onTap: () async {
+                  Navigator.pop(sheetContext);
+                  final remove = await showDialog<bool>(
+                    context: context,
+                    builder: (context) => AlertDialog(
+                      title: Text('Delete "${chat.title}" for everyone?'),
+                      content: const Text(
+                          'The group disappears for everyone who joined it.'),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(context, false),
+                          child: const Text('Cancel'),
+                        ),
+                        FilledButton(
+                          style: FilledButton.styleFrom(
+                              backgroundColor: Colors.red),
+                          onPressed: () => Navigator.pop(context, true),
+                          child: const Text('Delete'),
+                        ),
+                      ],
+                    ),
+                  );
+                  if (remove != true) return;
+                  final error =
+                      await _service.deleteGroupForEveryone(chat);
+                  if (error != null && mounted) {
+                    ScaffoldMessenger.of(context)
+                        .showSnackBar(SnackBar(content: Text(error)));
+                  }
+                },
+              ),
             ListTile(
               leading:
                   const Icon(Icons.delete_rounded, color: Colors.redAccent),
-              title: const Text('Delete chat'),
+              title: Text(chat.isDm ? 'Delete chat' : 'Leave group'),
               onTap: () async {
                 Navigator.pop(sheetContext);
                 final remove = await showDialog<bool>(
                   context: context,
                   builder: (context) => AlertDialog(
-                    title: Text('Delete "${chat.title}"?'),
+                    title: Text(chat.isDm
+                        ? 'Delete "${chat.title}"?'
+                        : 'Leave "${chat.title}"?'),
                     content: const Text(
                         'Removes the chat and its messages on this device.'),
                     actions: [
@@ -307,6 +375,7 @@ class _ChatsTabState extends State<ChatsTab> {
                         .timeLabel;
                 return WaChatTile(
                   title: chat.title,
+                  avatar: chat.peerIdentity?.avatar,
                   subtitle: chat.lastMessage.isEmpty
                       ? (chat.isDm
                           ? 'Say hello 👋'
@@ -493,6 +562,7 @@ class _PeopleTabState extends State<PeopleTab> {
                 title: peer.name,
                 subtitle: 'Verified · ${peer.fingerprint}',
                 leadingIcon: null,
+                avatar: peer.avatar,
                 onTap: () => _showIdentity(peer),
               ),
             if (peers.isEmpty)
@@ -517,7 +587,7 @@ class _PeopleTabState extends State<PeopleTab> {
                   leadingIcon: Icons.groups_rounded,
                   onTap: () async {
                     final chat =
-                        await ChatService.instance.createGroup(group.name);
+                        await ChatService.instance.joinPublicGroup(group);
                     if (context.mounted) {
                       Navigator.push(
                         context,

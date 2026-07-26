@@ -42,6 +42,18 @@ dependencies:
   settings_ui: ^3.0.1
   flutter_quill: ^11.5.0
   cryptography: ^2.7.0
+  flutter_local_notifications: ^19.0.0
+  flutter_secure_storage: ^10.3.1
+  image_picker: ^1.1.2
+  image: ^4.3.0
+
+# flutter_secure_storage 10.3.1 pins its Windows implementation to a build
+# that requires win32 5.x, which in turn drags quill_native_bridge_windows
+# down to 0.0.2 — a version that no longer compiles against win32 5 (missing
+# GMEM_MOVEABLE). 4.2.2 is the same plugin built against win32 6, which keeps
+# the Windows target buildable.
+dependency_overrides:
+  flutter_secure_storage_windows: ^4.2.2
 
 dev_dependencies:
   flutter_test:

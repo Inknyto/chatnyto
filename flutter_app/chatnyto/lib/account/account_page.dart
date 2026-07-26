@@ -2,8 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:settings_ui/settings_ui.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../core/brokers/broker_service.dart';
+import '../core/brokers/brokers_page.dart';
+import '../core/crypto/crypto_service.dart';
+import '../core/crypto/password_vault.dart';
+import '../core/media/image_service.dart';
+import '../core/notifications/notification_service.dart';
 import '../core/settings/wallpaper_picker.dart';
 import '../core/theme/background_controller.dart';
+import '../core/theme/glass_controller.dart';
 import '../core/theme/theme_controller.dart';
 import '../core/widgets/liquid_glass.dart';
 import 'security_page.dart';
@@ -19,6 +26,10 @@ class _AccountPageState extends State<AccountPage> {
   bool _notificationsEnabled = true;
   bool _biometricsEnabled = false;
   bool _locationEnabled = false;
+  bool _askPassword = false;
+  bool _autoConnect = true;
+  String _avatar = '';
+  NotificationSound _sound = NotificationSound.chime;
   String _name = '';
   String _email = '';
   String _phone = '';
@@ -32,9 +43,17 @@ class _AccountPageState extends State<AccountPage> {
 
   Future<void> _load() async {
     await BackgroundController.instance.load();
+    await GlassController.instance.load();
+    final askPassword = await PasswordVault.instance.askEveryOpen();
+    final autoConnect = await BrokerService.instance.autoConnectEnabled();
+    final sound = await NotificationService.instance.sound();
     final prefs = await SharedPreferences.getInstance();
     if (!mounted) return;
     setState(() {
+      _sound = sound;
+      _askPassword = askPassword;
+      _autoConnect = autoConnect;
+      _avatar = prefs.getString(IdentityService.avatarPrefKey) ?? '';
       _name = prefs.getString('profile.name') ?? '';
       _email = prefs.getString('profile.email') ?? '';
       _phone = prefs.getString('profile.phone') ?? '';
@@ -84,6 +103,37 @@ class _AccountPageState extends State<AccountPage> {
       await prefs.setString(prefKey, controller.text.trim());
       if (mounted) setState(() => apply(controller.text.trim()));
     }
+  }
+
+  /// Picks the alert tone; choosing one plays it so it can be heard.
+  Future<void> _pickSound() async {
+    final choice = await showDialog<NotificationSound>(
+      context: context,
+      builder: (context) => SimpleDialog(
+        title: const Text('Notification sound'),
+        children: [
+          for (final sound in NotificationSound.values)
+            SimpleDialogOption(
+              onPressed: () => Navigator.pop(context, sound),
+              child: Row(
+                children: [
+                  Icon(
+                    sound == _sound
+                        ? Icons.radio_button_checked_rounded
+                        : Icons.radio_button_unchecked_rounded,
+                    size: 20,
+                  ),
+                  const SizedBox(width: 12),
+                  Text(sound.label),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+    if (choice == null) return;
+    await NotificationService.instance.setSound(choice);
+    if (mounted) setState(() => _sound = choice);
   }
 
   Future<void> _pickLanguage() async {
@@ -144,6 +194,100 @@ class _AccountPageState extends State<AccountPage> {
     }
   }
 
+  /// Profile picture: stored locally and advertised (signed) with the
+  /// identity, so contacts see a face next to the verified fingerprint.
+  Widget _profilePictureTile() {
+    final picture = ImageService.decode(_avatar);
+    return LiquidGlass(
+      margin: const EdgeInsets.fromLTRB(12, 6, 12, 6),
+      child: Row(
+        children: [
+          CircleAvatar(
+            radius: 30,
+            backgroundImage: picture == null ? null : MemoryImage(picture),
+            child: picture == null
+                ? const Icon(Icons.person_rounded, size: 30)
+                : null,
+          ),
+          const SizedBox(width: 16),
+          const Expanded(
+            child: Text('Profile picture',
+                style: TextStyle(fontWeight: FontWeight.w500)),
+          ),
+          if (_avatar.isNotEmpty)
+            IconButton(
+              tooltip: 'Remove',
+              icon: const Icon(Icons.delete_outline_rounded),
+              onPressed: () => _setAvatar(''),
+            ),
+          IconButton(
+            tooltip: 'Change',
+            icon: const Icon(Icons.photo_camera_rounded),
+            onPressed: _pickAvatar,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _pickAvatar() async {
+    final encoded = await ImageService.instance.pickAsBase64(
+      fromCamera: false,
+      maxEdge: ImageService.avatarMaxEdge,
+      quality: 60,
+    );
+    if (encoded != null) await _setAvatar(encoded);
+  }
+
+  Future<void> _setAvatar(String value) async {
+    final prefs = await SharedPreferences.getInstance();
+    if (value.isEmpty) {
+      await prefs.remove(IdentityService.avatarPrefKey);
+    } else {
+      await prefs.setString(IdentityService.avatarPrefKey, value);
+    }
+    // Re-publish the identity so contacts pick the new picture up.
+    await BrokerService.instance.advertiseEverywhere();
+    if (mounted) setState(() => _avatar = value);
+  }
+
+  /// Slider controlling how solid every glass surface looks; persisted, so
+  /// the whole app keeps the chosen shade after a restart.
+  Widget _glassOpacityTile() {
+    return ValueListenableBuilder<double>(
+      valueListenable: GlassController.instance,
+      builder: (context, solidity, _) => LiquidGlass(
+        margin: const EdgeInsets.fromLTRB(12, 6, 12, 6),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.opacity_rounded),
+                const SizedBox(width: 12),
+                const Expanded(child: Text('Glass opacity')),
+                Text(GlassController.instance.label,
+                    style: const TextStyle(fontSize: 13)),
+              ],
+            ),
+            Slider(
+              value: solidity,
+              onChanged: (value) => GlassController.instance.set(value),
+            ),
+            const Padding(
+              padding: EdgeInsets.only(left: 4, bottom: 4),
+              child: Text(
+                'How much the panels, bubbles and bars show through. '
+                'Applies everywhere and is remembered.',
+                style: TextStyle(fontSize: 12),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   void _showInfo(String title, String body) {
     showDialog(
       context: context,
@@ -177,7 +321,8 @@ class _AccountPageState extends State<AccountPage> {
           sections: [
             SettingsSection(
               title: const Text('Profile'),
-              tiles: <SettingsTile>[
+              tiles: <AbstractSettingsTile>[
+                CustomSettingsTile(child: _profilePictureTile()),
                 SettingsTile.navigation(
                   leading: const Icon(Icons.person_rounded),
                   title: const Text('Display name'),
@@ -229,6 +374,19 @@ class _AccountPageState extends State<AccountPage> {
                   ),
                 ),
                 SettingsTile.switchTile(
+                  onToggle: (value) async {
+                    await PasswordVault.instance.setAskEveryOpen(value);
+                    if (mounted) setState(() => _askPassword = value);
+                  },
+                  initialValue: _askPassword,
+                  leading: const Icon(Icons.password_rounded),
+                  title: const Text('Ask password at every app open'),
+                  description: Text(_askPassword
+                      ? 'You unlock the app by hand each time.'
+                      : 'Your password is kept in the device keystore so '
+                          'the app opens straight into your chats.'),
+                ),
+                SettingsTile.switchTile(
                   onToggle: (value) {
                     _setBool('biometrics', value);
                     setState(() => _biometricsEnabled = value);
@@ -240,16 +398,59 @@ class _AccountPageState extends State<AccountPage> {
               ],
             ),
             SettingsSection(
+              title: const Text('Networks'),
+              tiles: <SettingsTile>[
+                SettingsTile.switchTile(
+                  onToggle: (value) async {
+                    await BrokerService.instance
+                        .setAutoConnectEnabled(value);
+                    if (mounted) setState(() => _autoConnect = value);
+                  },
+                  initialValue: _autoConnect,
+                  leading: const Icon(Icons.autorenew_rounded),
+                  title: const Text('Connect automatically'),
+                  description: const Text(
+                      'Keeps your networks connected in the background so '
+                      'messages arrive while the app is not in front.'),
+                ),
+                SettingsTile.navigation(
+                  leading: const Icon(Icons.dns_rounded),
+                  title: const Text('Networks'),
+                  description:
+                      const Text('Add, find and edit brokers'),
+                  onPressed: (context) => Navigator.push(
+                    context,
+                    GlassPageRoute(page: const BrokersPage()),
+                  ),
+                ),
+              ],
+            ),
+            SettingsSection(
               title: const Text('Notifications'),
               tiles: <SettingsTile>[
                 SettingsTile.switchTile(
-                  onToggle: (value) {
-                    _setBool('notifications', value);
-                    setState(() => _notificationsEnabled = value);
+                  onToggle: (value) async {
+                    await _setBool('notifications', value);
+                    if (value) {
+                      await NotificationService.instance.init();
+                      await NotificationService.instance.requestPermission();
+                    }
+                    if (mounted) {
+                      setState(() => _notificationsEnabled = value);
+                    }
                   },
                   initialValue: _notificationsEnabled,
                   leading: const Icon(Icons.notifications_rounded),
-                  title: const Text('Push Notifications'),
+                  title: const Text('Message notifications'),
+                  description: const Text(
+                      'Alerts you when a message arrives and the chat is '
+                      'not open.'),
+                ),
+                SettingsTile.navigation(
+                  leading: const Icon(Icons.music_note_rounded),
+                  title: const Text('Notification sound'),
+                  value: Text(_sound.label),
+                  onPressed: (_) => _pickSound(),
                 ),
               ],
             ),
@@ -274,7 +475,7 @@ class _AccountPageState extends State<AccountPage> {
             ),
             SettingsSection(
               title: const Text('Preferences'),
-              tiles: <SettingsTile>[
+              tiles: <AbstractSettingsTile>[
                 SettingsTile.navigation(
                   leading: const Icon(Icons.language_rounded),
                   title: const Text('Language'),
@@ -318,6 +519,7 @@ class _AccountPageState extends State<AccountPage> {
                         page: const WallpaperPickerPage(forApp: true)),
                   ),
                 ),
+                CustomSettingsTile(child: _glassOpacityTile()),
               ],
             ),
             SettingsSection(
