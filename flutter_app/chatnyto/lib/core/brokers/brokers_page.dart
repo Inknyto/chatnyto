@@ -15,6 +15,7 @@ class BrokersPage extends StatefulWidget {
 class _BrokersPageState extends State<BrokersPage> {
   final BrokerService _service = BrokerService.instance;
   final Set<String> _busy = {};
+  String _query = '';
 
   @override
   void initState() {
@@ -33,34 +34,60 @@ class _BrokersPageState extends State<BrokersPage> {
     if (mounted) setState(() {});
   }
 
-  Future<void> _addBroker() async {
-    final nameController = TextEditingController();
-    final hostController = TextEditingController();
-    final portController = TextEditingController(text: '1883');
-    final added = await showDialog<bool>(
+  Future<void> _addBroker() => _brokerDialog();
+
+  /// Add ([existing] == null) or edit a broker, including the optional
+  /// username/password for password-protected brokers.
+  Future<void> _brokerDialog({Broker? existing}) async {
+    final nameController = TextEditingController(text: existing?.name ?? '');
+    final hostController = TextEditingController(text: existing?.host ?? '');
+    final portController =
+        TextEditingController(text: (existing?.port ?? 1883).toString());
+    final userController =
+        TextEditingController(text: existing?.username ?? '');
+    final passController =
+        TextEditingController(text: existing?.password ?? '');
+    final saved = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Add broker'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: nameController,
-              decoration: const InputDecoration(labelText: 'Name'),
-            ),
-            const SizedBox(height: 8),
-            TextField(
-              controller: hostController,
-              decoration:
-                  const InputDecoration(labelText: 'Host (IP or hostname)'),
-            ),
-            const SizedBox(height: 8),
-            TextField(
-              controller: portController,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(labelText: 'Port'),
-            ),
-          ],
+        title: Text(existing == null ? 'Add broker' : 'Edit broker'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: nameController,
+                decoration: const InputDecoration(labelText: 'Name'),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: hostController,
+                decoration:
+                    const InputDecoration(labelText: 'Host (IP or hostname)'),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: portController,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(labelText: 'Port'),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: userController,
+                decoration: const InputDecoration(
+                  labelText: 'Username (optional)',
+                  helperText: 'Only for password-protected brokers',
+                ),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: passController,
+                obscureText: true,
+                decoration:
+                    const InputDecoration(labelText: 'Password (optional)'),
+              ),
+            ],
+          ),
         ),
         actions: [
           TextButton(
@@ -69,21 +96,64 @@ class _BrokersPageState extends State<BrokersPage> {
           ),
           FilledButton(
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('Add'),
+            child: Text(existing == null ? 'Add' : 'Save'),
           ),
         ],
       ),
     );
-    if (added == true &&
+    if (saved == true &&
         nameController.text.isNotEmpty &&
         hostController.text.isNotEmpty) {
+      if (existing != null) {
+        await _service.disconnect(existing);
+        await _service.removeBroker(existing);
+      }
       await _service.addBroker(Broker(
         name: nameController.text.trim(),
         host: hostController.text.trim(),
         port: int.tryParse(portController.text) ?? 1883,
+        username: userController.text.trim(),
+        password: passController.text,
       ));
     }
   }
+
+  /// Long-press edit mode for a broker: edit its parameters or delete it.
+  void _showBrokerOptions(Broker broker) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) => LiquidGlass(
+        margin: const EdgeInsets.all(12),
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.edit_rounded),
+              title: const Text('Edit'),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                _editBroker(broker);
+              },
+            ),
+            ListTile(
+              leading:
+                  const Icon(Icons.delete_rounded, color: Colors.redAccent),
+              title: const Text('Delete'),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                _service.removeBroker(broker);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _editBroker(Broker broker) =>
+      _brokerDialog(existing: broker);
 
   Future<void> _toggle(Broker broker) async {
     setState(() => _busy.add(broker.name));
@@ -100,14 +170,21 @@ class _BrokersPageState extends State<BrokersPage> {
     if (mounted) setState(() => _busy.remove(broker.name));
   }
 
+  bool _matches(String text) =>
+      _query.isEmpty || text.toLowerCase().contains(_query.toLowerCase());
+
   @override
   Widget build(BuildContext context) {
-    final brokers = _service.brokers;
-    final peers = _service.peers;
+    final brokers = _service.brokers
+        .where((b) => _matches('${b.name} ${b.host}'))
+        .toList();
+    final peers = _service.peers
+        .where((p) => _matches('${p.name} ${p.fingerprint}'))
+        .toList();
     return GlassBackground(
       child: Scaffold(
         backgroundColor: Colors.transparent,
-        appBar: AppBar(title: const Text('Brokers')),
+        appBar: AppBar(title: const Text('Networks')),
         floatingActionButton: FloatingActionButton(
           onPressed: _addBroker,
           child: const Icon(Icons.add_rounded),
@@ -115,6 +192,19 @@ class _BrokersPageState extends State<BrokersPage> {
         body: ListView(
           padding: const EdgeInsets.all(12),
           children: [
+            LiquidGlass(
+              margin: const EdgeInsets.symmetric(vertical: 6),
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              radius: 24,
+              child: TextField(
+                decoration: const InputDecoration(
+                  icon: Icon(Icons.search_rounded),
+                  border: InputBorder.none,
+                  hintText: 'Search networks and people',
+                ),
+                onChanged: (value) => setState(() => _query = value),
+              ),
+            ),
             if (brokers.isEmpty)
               const LiquidGlass(
                 margin: EdgeInsets.symmetric(vertical: 6),
@@ -129,6 +219,7 @@ class _BrokersPageState extends State<BrokersPage> {
               LiquidGlass(
                 margin: const EdgeInsets.symmetric(vertical: 6),
                 child: ListTile(
+                  onLongPress: () => _showBrokerOptions(broker),
                   leading: Icon(
                     _service.isConnected(broker)
                         ? Icons.cloud_done_rounded

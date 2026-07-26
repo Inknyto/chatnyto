@@ -6,6 +6,7 @@ import '../ais/ais_page.dart';
 import '../core/brokers/broker_service.dart';
 import '../core/brokers/brokers_page.dart';
 import '../core/crypto/crypto_service.dart';
+import '../core/settings/wallpaper_picker.dart';
 import '../core/theme/theme_controller.dart';
 import '../core/widgets/liquid_glass.dart';
 import '../core/widgets/wa_components.dart';
@@ -189,6 +190,94 @@ class _ChatsTabState extends State<ChatsTab> {
     }
   }
 
+  /// Long-press edit mode: rename, per-chat wallpaper, delete.
+  void _showChatOptions(ChatEntry chat) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) => LiquidGlass(
+        margin: const EdgeInsets.all(12),
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.edit_rounded),
+              title: const Text('Rename'),
+              onTap: () async {
+                Navigator.pop(sheetContext);
+                final controller =
+                    TextEditingController(text: chat.title);
+                final saved = await showDialog<bool>(
+                  context: context,
+                  builder: (context) => AlertDialog(
+                    title: const Text('Rename chat'),
+                    content: TextField(
+                        controller: controller, autofocus: true),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(context, false),
+                        child: const Text('Cancel'),
+                      ),
+                      FilledButton(
+                        onPressed: () => Navigator.pop(context, true),
+                        child: const Text('Save'),
+                      ),
+                    ],
+                  ),
+                );
+                if (saved == true) {
+                  _service.renameChat(chat, controller.text);
+                }
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.wallpaper_rounded),
+              title: const Text('Wallpaper for this chat'),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                Navigator.push(
+                  context,
+                  GlassPageRoute(
+                      page: WallpaperPickerPage(chatId: chat.id)),
+                );
+              },
+            ),
+            ListTile(
+              leading:
+                  const Icon(Icons.delete_rounded, color: Colors.redAccent),
+              title: const Text('Delete chat'),
+              onTap: () async {
+                Navigator.pop(sheetContext);
+                final remove = await showDialog<bool>(
+                  context: context,
+                  builder: (context) => AlertDialog(
+                    title: Text('Delete "${chat.title}"?'),
+                    content: const Text(
+                        'Removes the chat and its messages on this device.'),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(context, false),
+                        child: const Text('Cancel'),
+                      ),
+                      FilledButton(
+                        style: FilledButton.styleFrom(
+                            backgroundColor: Colors.red),
+                        onPressed: () => Navigator.pop(context, true),
+                        child: const Text('Delete'),
+                      ),
+                    ],
+                  ),
+                );
+                if (remove == true) _service.removeChat(chat);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final chats = _service.chats;
@@ -230,30 +319,7 @@ class _ChatsTabState extends State<ChatsTab> {
                     context,
                     GlassPageRoute(page: RevampChatPage(chat: chat)),
                   ),
-                  onLongPress: () async {
-                    final remove = await showDialog<bool>(
-                      context: context,
-                      builder: (context) => AlertDialog(
-                        title: Text('Delete "${chat.title}"?'),
-                        content: const Text(
-                            'Removes the chat and its messages on this '
-                            'device.'),
-                        actions: [
-                          TextButton(
-                            onPressed: () => Navigator.pop(context, false),
-                            child: const Text('Cancel'),
-                          ),
-                          FilledButton(
-                            style: FilledButton.styleFrom(
-                                backgroundColor: Colors.red),
-                            onPressed: () => Navigator.pop(context, true),
-                            child: const Text('Delete'),
-                          ),
-                        ],
-                      ),
-                    );
-                    if (remove == true) _service.removeChat(chat);
-                  },
+                  onLongPress: () => _showChatOptions(chat),
                 );
               },
             ),
@@ -434,6 +500,33 @@ class _PeopleTabState extends State<PeopleTab> {
                 padding: EdgeInsets.only(top: 24),
                 child: GlassShimmer(count: 3),
               ),
+            if (_brokers.publicGroups.isNotEmpty) ...[
+              const Padding(
+                padding: EdgeInsets.fromLTRB(8, 20, 8, 4),
+                child: Text('Public groups on the mesh',
+                    style: TextStyle(
+                        fontSize: 16, fontWeight: FontWeight.w600)),
+              ),
+              for (final group in _brokers.publicGroups
+                  .where((g) =>
+                      _query.isEmpty ||
+                      g.name.toLowerCase().contains(_query.toLowerCase())))
+                WaChatTile(
+                  title: group.name,
+                  subtitle: 'Public group · tap to join',
+                  leadingIcon: Icons.groups_rounded,
+                  onTap: () async {
+                    final chat =
+                        await ChatService.instance.createGroup(group.name);
+                    if (context.mounted) {
+                      Navigator.push(
+                        context,
+                        GlassPageRoute(page: RevampChatPage(chat: chat)),
+                      );
+                    }
+                  },
+                ),
+            ],
           ],
         );
       },
@@ -573,19 +666,19 @@ class CommunitiesTab extends StatelessWidget {
       children: [
         tile(
           Icons.people_alt_rounded,
-          'Humans',
+          'People',
           'Classic rooms with rich-text messages',
           const HumansPage(),
         ),
         tile(
-          Icons.smart_toy_rounded,
-          'Robots',
-          'Talk to your connected devices',
+          Icons.devices_other_rounded,
+          'IoT devices',
+          'Securely talk to your connected devices',
           const RobotsPage(),
         ),
         tile(
           Icons.auto_awesome_rounded,
-          'AIs',
+          'AI agents',
           'Local and cloud AI assistants',
           const AIsPage(),
         ),

@@ -3,12 +3,13 @@ import 'package:flutter/material.dart';
 import '../theme/background_controller.dart';
 import '../widgets/liquid_glass.dart';
 
-/// Grid of bundled background images the user can apply globally, or —
-/// when [chatId] is given — to a single chat.
+/// Grid of bundled background images. Three scopes: the whole app
+/// ([forApp]), a single chat ([chatId]), or the global chat default.
 class WallpaperPickerPage extends StatelessWidget {
-  const WallpaperPickerPage({super.key, this.chatId});
+  const WallpaperPickerPage({super.key, this.chatId, this.forApp = false});
 
   final String? chatId;
+  final bool forApp;
 
   @override
   Widget build(BuildContext context) {
@@ -17,15 +18,18 @@ class WallpaperPickerPage extends StatelessWidget {
       child: Scaffold(
         backgroundColor: Colors.transparent,
         appBar: AppBar(
-          title: Text(chatId == null
-              ? 'Chat wallpaper'
-              : 'Wallpaper for this chat'),
+          title: Text(forApp
+              ? 'App wallpaper'
+              : chatId == null
+                  ? 'Chat wallpaper'
+                  : 'Wallpaper for this chat'),
         ),
         body: ValueListenableBuilder<ChatWallpaper>(
           valueListenable: BackgroundController.instance,
           builder: (context, _, __) {
-            final selected =
-                BackgroundController.instance.forChat(chatId);
+            final selected = forApp
+                ? BackgroundController.instance.appWallpaper
+                : BackgroundController.instance.forChat(chatId);
             return GridView.count(
               padding: const EdgeInsets.all(16),
               crossAxisCount: 2,
@@ -38,6 +42,7 @@ class WallpaperPickerPage extends StatelessWidget {
                     wallpaper: wallpaper,
                     selected: selected.asset == wallpaper.asset,
                     chatId: chatId,
+                    forApp: forApp,
                   ),
               ],
             );
@@ -53,19 +58,24 @@ class _WallpaperCard extends StatelessWidget {
     required this.wallpaper,
     required this.selected,
     this.chatId,
+    this.forApp = false,
   });
 
   final ChatWallpaper wallpaper;
   final bool selected;
   final String? chatId;
+  final bool forApp;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return GestureDetector(
-      onTap: () => chatId == null
-          ? BackgroundController.instance.select(wallpaper)
-          : BackgroundController.instance.selectForChat(chatId!, wallpaper),
+      onTap: () => forApp
+          ? BackgroundController.instance.selectAppWallpaper(wallpaper)
+          : chatId == null
+              ? BackgroundController.instance.select(wallpaper)
+              : BackgroundController.instance
+                  .selectForChat(chatId!, wallpaper),
       child: Container(
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(18),

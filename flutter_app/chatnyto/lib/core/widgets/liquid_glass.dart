@@ -1,6 +1,8 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
 
+import '../theme/background_controller.dart';
+
 /// Frosted, translucent container used across the app for the
 /// "liquid glass" design language.
 class LiquidGlass extends StatelessWidget {
@@ -57,7 +59,9 @@ class LiquidGlass extends StatelessWidget {
   }
 }
 
-/// Animated gradient backdrop that glass surfaces blur against.
+/// Backdrop that all glass surfaces blur against: the user's app-level
+/// wallpaper image when one is chosen (with a translucent gradient wash on
+/// top so the glass keeps its liquid look), otherwise an animated gradient.
 class GlassBackground extends StatelessWidget {
   const GlassBackground({super.key, required this.child});
 
@@ -69,16 +73,46 @@ class GlassBackground extends StatelessWidget {
     final colors = isDark
         ? const [Color(0xFF1B1730), Color(0xFF12101C), Color(0xFF251A3A)]
         : const [Color(0xFFE8E4FA), Color(0xFFF2F1FA), Color(0xFFDCE9F7)];
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 400),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: colors,
-        ),
-      ),
-      child: child,
+    BackgroundController.instance.load();
+    return ListenableBuilder(
+      listenable: BackgroundController.instance,
+      builder: (context, _) {
+        final wallpaper = BackgroundController.instance.appWallpaper;
+        if (wallpaper.asset != null && wallpaper.asset!.isNotEmpty) {
+          return DecoratedBox(
+            decoration: BoxDecoration(
+              image: DecorationImage(
+                image: AssetImage(wallpaper.asset!),
+                fit: BoxFit.cover,
+              ),
+            ),
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    colors.first.withOpacity(0.25),
+                    colors.last.withOpacity(0.25),
+                  ],
+                ),
+              ),
+              child: child,
+            ),
+          );
+        }
+        return AnimatedContainer(
+          duration: const Duration(milliseconds: 400),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: colors,
+            ),
+          ),
+          child: child,
+        );
+      },
     );
   }
 }

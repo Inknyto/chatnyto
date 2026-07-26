@@ -98,6 +98,20 @@ class _EntitySettingsState extends State<EntitySettings> {
                     GlassPageRoute(page: const WallpaperPickerPage()),
                   ),
                 ),
+                SettingsTile.navigation(
+                  leading: const Icon(Icons.image_rounded),
+                  title: const Text('App wallpaper'),
+                  value: ValueListenableBuilder<ChatWallpaper>(
+                    valueListenable: BackgroundController.instance,
+                    builder: (context, _, __) => Text(
+                        BackgroundController.instance.appWallpaper.name),
+                  ),
+                  onPressed: (context) => Navigator.push(
+                    context,
+                    GlassPageRoute(
+                        page: const WallpaperPickerPage(forApp: true)),
+                  ),
+                ),
               ],
             ),
             SettingsSection(

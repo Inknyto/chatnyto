@@ -87,3 +87,58 @@ Done:       rooms (optional passphrase), Updates tab (who's online + network sta
 Done:       Communities tab (classic humans/robots/AIs sections). No technical
 Done:       configuration required anywhere in the main flow (chat_service.dart).
 Done:     Android release APK builds; flutter analyze has zero errors.
+Done: [x] DONE — People tab showing only yourself: two root causes fixed. (1) The app
+Done:     attached the MQTT updates listener AFTER subscribing, so presence messages
+Done:     delivered right after SUBACK were lost (broker_service.dart now listens
+Done:     before subscribing). (2) The mongoose broker ignored the RETAIN flag, so
+Done:     presence never reached late joiners — retained-message support was added to
+Done:     the ESP32 broker (see below) and the app also re-advertises presence every
+Done:     30s via a heartbeat (BrokerService.startHeartbeat), so discovery works even
+Done:     on brokers without retain.
+Done: [x] DONE — Asynchronous messaging + encrypted persistence (revamp/chat_service):
+Done:     * All P2P and group messages are persisted encrypted at rest (AES-256-GCM
+Done:       under a key derived from the identity seed, IdentityService.storageKey);
+Done:       legacy plaintext history is migrated and removed.
+Done:     * Messages sent while offline land in an encrypted outbox and are flushed
+Done:       automatically when a broker connects.
+Done:     * Missed messages are recovered via a sync protocol: clients broadcast
+Done:       encrypted sync requests carrying the timestamp of the newest message they
+Done:       hold, and any online member replays what came after (throttled, jittered,
+Done:       deduplicated) — so someone who connects after the sender still receives
+Done:       the messages, and incoming messages are saved even when the chat is not
+Done:       open (they arrive through the always-on broker subscription).
+Done: [x] DONE — Global app wallpaper: Settings -> App wallpaper paints the chosen
+Done:     image under every screen with a translucent gradient wash so the whole app
+Done:     stays liquid glass (GlassBackground + BackgroundController.appWallpaper).
+Done:     Chat-global and per-chat wallpapers still apply on top.
+Done: [x] DONE — Public groups on the mesh: passphrase-less groups are announced on
+Done:     chatnyto/groups/<slug> (heartbeat + on join), discovered groups are listed
+Done:     in the People tab under "Public groups on the mesh" with one-tap join, and
+Done:     joiners receive the group history through the sync protocol.
+Done: [x] DONE — esp-idf-mqtt-broker adapted and rebuilt: retained-message support
+Done:     added to main/mqtt_server.c (stores the last retained message per topic,
+Done:     max 64, delivers matching retained messages on SUBSCRIBE, empty payload
+Done:     deletes, oldest dropped when full). Built successfully for esp32s3 with
+Done:     /opt/esp-idf (v6.0.2): idf.py set-target esp32s3 && idf.py build ->
+Done:     build/mqtt-broker.bin (app partition 97% used — grow it if the firmware
+Done:     gains more features).
+Done: [x] DONE — Positioning: the app is a tool for easy and secure connection for
+Done:     people, AI agents and IoT devices. Robots section renamed to "IoT devices"
+Done:     (Communities tab), AIs to "AI agents", onboarding tagline updated. No
+Done:     technical configuration needed anywhere in the main flow.
+Done: [x] DONE — Editing mode on long press: long-pressing a chat (revamp Chats
+Done:     tab) opens Rename / Wallpaper-for-this-chat / Delete; long-pressing a
+Done:     connection (humans, robots/IoT, AIs pages) opens Edit (broker, topic,
+Done:     passphrase) / Delete; long-pressing a network on the Networks page opens
+Done:     Edit (name, host, port) / Delete. Nothing deletes instantly anymore.
+Done: [x] DONE — Friendlier broker connections: the Brokers page (renamed
+Done:     "Networks") got a search field that filters both the registered networks
+Done:     (by name/host) and the people discovered on them (by name/fingerprint);
+Done:     the People tab searches people and public groups across all connected
+Done:     brokers; networks auto-connect with defaults, no manual setup needed.
+Done: [x] DONE — Password-protected brokers: the Broker model carries optional
+Done:     username/password (persisted with the broker list), credentials are sent
+Done:     on MQTT CONNECT (and a CONNACK refusal is treated as a failed
+Done:     connection), and the add/edit broker dialog on the Networks page has
+Done:     optional Username/Password fields. Works with the ESP32 broker's
+Done:     BROKER_AUTHENTICATION option and any mosquitto with password_file.

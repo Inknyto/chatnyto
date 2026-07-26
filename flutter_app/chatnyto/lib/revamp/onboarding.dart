@@ -42,8 +42,9 @@ class WelcomeScreen extends StatelessWidget {
               const Padding(
                 padding: EdgeInsets.symmetric(horizontal: 32),
                 child: Text(
-                  'Chat with people around you — with or without internet. '
-                  'Everything is end-to-end encrypted.',
+                  'Easy, secure connections between people, AI agents and '
+                  'IoT devices — with or without internet. Everything is '
+                  'end-to-end encrypted.',
                   textAlign: TextAlign.center,
                   style: TextStyle(fontSize: 15),
                 ),
