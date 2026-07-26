@@ -6,6 +6,9 @@
     <!-- New-message notifications while the app runs in the background. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Scanning a network's QR code and taking a photo to send. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
 
 
     <application

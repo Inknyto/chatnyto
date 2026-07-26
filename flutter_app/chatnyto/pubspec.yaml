@@ -46,6 +46,8 @@ dependencies:
   flutter_secure_storage: ^10.3.1
   image_picker: ^1.1.2
   image: ^4.3.0
+  qr_flutter: ^4.1.0
+  mobile_scanner: ^7.0.0
 
 # flutter_secure_storage 10.3.1 pins its Windows implementation to a build
 # that requires win32 5.x, which in turn drags quill_native_bridge_windows

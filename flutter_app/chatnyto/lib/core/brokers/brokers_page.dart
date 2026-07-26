@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 
 import '../widgets/liquid_glass.dart';
+import 'broker_qr.dart';
 import 'broker_service.dart';
+import 'network_graph_page.dart';
 
 /// Lets the user register brokers by name, connect to and disconnect from
 /// each one, and see the peers discovered through presence advertisements.
@@ -144,6 +146,17 @@ class _BrokersPageState extends State<BrokersPage> {
               },
             ),
             ListTile(
+              leading: const Icon(Icons.qr_code_2_rounded),
+              title: const Text('Share by QR code'),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                Navigator.push(
+                  context,
+                  GlassPageRoute(page: BrokerQrPage(broker: broker)),
+                );
+              },
+            ),
+            ListTile(
               leading:
                   const Icon(Icons.delete_rounded, color: Colors.redAccent),
               title: const Text('Delete'),
@@ -178,6 +191,25 @@ class _BrokersPageState extends State<BrokersPage> {
       }
     }
     if (mounted) setState(() => _busy.remove(broker.name));
+  }
+
+  /// Joins a network from somebody else's QR code.
+  Future<void> _scanQr() async {
+    final broker = await Navigator.push<Broker>(
+      context,
+      GlassPageRoute(page: const BrokerScanPage()),
+    );
+    if (broker == null || !mounted) return;
+    await _service.addBroker(broker);
+    final ok = await _service.connect(broker);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(ok
+            ? 'Joined ${broker.name}.'
+            : 'Added ${broker.name}, but it is not reachable yet.'),
+      ),
+    );
   }
 
   /// Scans the current network for MQTT brokers so the user can join one
@@ -227,7 +259,24 @@ class _BrokersPageState extends State<BrokersPage> {
     return GlassBackground(
       child: Scaffold(
         backgroundColor: Colors.transparent,
-        appBar: AppBar(title: const Text('Networks')),
+        appBar: AppBar(
+          title: const Text('Networks'),
+          actions: [
+            IconButton(
+              tooltip: 'Scan a network code',
+              icon: const Icon(Icons.qr_code_scanner_rounded),
+              onPressed: _scanQr,
+            ),
+            IconButton(
+              tooltip: 'Network map',
+              icon: const Icon(Icons.hub_rounded),
+              onPressed: () => Navigator.push(
+                context,
+                GlassPageRoute(page: const NetworkGraphPage()),
+              ),
+            ),
+          ],
+        ),
         floatingActionButton: FloatingActionButton(
           onPressed: _addBroker,
           child: const Icon(Icons.add_rounded),
