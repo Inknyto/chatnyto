@@ -16,12 +16,18 @@ class _BrokersPageState extends State<BrokersPage> {
   final BrokerService _service = BrokerService.instance;
   final Set<String> _busy = {};
   String _query = '';
+  bool _scanning = false;
+  bool _autoConnect = true;
+  List<DiscoveredBroker> _discovered = [];
 
   @override
   void initState() {
     super.initState();
     _service.load();
     _service.addListener(_onChanged);
+    _service.autoConnectEnabled().then((value) {
+      if (mounted) setState(() => _autoConnect = value);
+    });
   }
 
   @override
@@ -159,7 +165,11 @@ class _BrokersPageState extends State<BrokersPage> {
     setState(() => _busy.add(broker.name));
     if (_service.isConnected(broker)) {
       await _service.disconnect(broker);
+      // Remember the choice: a network switched off stays off across
+      // restarts instead of being reconnected by the heartbeat.
+      await _service.setAutoConnect(broker, false);
     } else {
+      await _service.setAutoConnect(broker, true);
       final ok = await _service.connect(broker);
       if (!ok && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -168,6 +178,39 @@ class _BrokersPageState extends State<BrokersPage> {
       }
     }
     if (mounted) setState(() => _busy.remove(broker.name));
+  }
+
+  /// Scans the current network for MQTT brokers so the user can join one
+  /// without knowing its address.
+  Future<void> _scanNetwork() async {
+    setState(() {
+      _scanning = true;
+      _discovered = [];
+    });
+    final found = await _service.discoverLocalBrokers();
+    if (!mounted) return;
+    setState(() {
+      _scanning = false;
+      _discovered = found
+          .where((d) => !_service.brokers.any((b) => b.host == d.host))
+          .toList();
+    });
+    if (found.isEmpty && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content: Text('No brokers found on this network.')),
+      );
+    }
+  }
+
+  Future<void> _addDiscovered(DiscoveredBroker discovered) async {
+    await _service.addBroker(Broker(
+      name: 'Network at ${discovered.host}',
+      host: discovered.host,
+      port: discovered.port,
+    ));
+    setState(() => _discovered.remove(discovered));
+    await _service.connect(_service.brokers.last);
   }
 
   bool _matches(String text) =>
@@ -205,6 +248,59 @@ class _BrokersPageState extends State<BrokersPage> {
                 onChanged: (value) => setState(() => _query = value),
               ),
             ),
+            LiquidGlass(
+              margin: const EdgeInsets.symmetric(vertical: 6),
+              child: Column(
+                children: [
+                  SwitchListTile(
+                    secondary: const Icon(Icons.autorenew_rounded),
+                    title: const Text('Connect automatically'),
+                    subtitle: const Text(
+                        'Reconnect the networks you use as soon as they are '
+                        'reachable, and stay connected in the background.'),
+                    value: _autoConnect,
+                    onChanged: (value) async {
+                      setState(() => _autoConnect = value);
+                      await _service.setAutoConnectEnabled(value);
+                    },
+                  ),
+                  ListTile(
+                    leading: _scanning
+                        ? const SizedBox(
+                            width: 22,
+                            height: 22,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.travel_explore_rounded),
+                    title: Text(_scanning
+                        ? 'Scanning this network…'
+                        : 'Find brokers on this network'),
+                    subtitle: const Text(
+                        'Looks for public MQTT brokers around you, including '
+                        'the LoRa box.'),
+                    onTap: _scanning ? null : _scanNetwork,
+                  ),
+                ],
+              ),
+            ),
+            if (_discovered.isNotEmpty) ...[
+              const Padding(
+                padding: EdgeInsets.fromLTRB(4, 12, 4, 4),
+                child: Text('Found on this network',
+                    style: TextStyle(fontWeight: FontWeight.bold)),
+              ),
+              for (final discovered in _discovered)
+                LiquidGlass(
+                  margin: const EdgeInsets.symmetric(vertical: 6),
+                  child: ListTile(
+                    leading: const Icon(Icons.lan_rounded),
+                    title: Text(discovered.label),
+                    subtitle: const Text('MQTT broker · tap to join'),
+                    trailing: const Icon(Icons.add_circle_outline_rounded),
+                    onTap: () => _addDiscovered(discovered),
+                  ),
+                ),
+            ],
             if (brokers.isEmpty)
               const LiquidGlass(
                 margin: EdgeInsets.symmetric(vertical: 6),

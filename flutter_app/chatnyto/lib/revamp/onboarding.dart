@@ -3,6 +3,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/brokers/broker_service.dart';
 import '../core/crypto/crypto_service.dart';
+import '../core/crypto/password_vault.dart';
+import '../core/notifications/notification_service.dart';
 import '../core/widgets/liquid_glass.dart';
 import 'chat_service.dart';
 import 'home_shell.dart';
@@ -117,6 +119,9 @@ class _SetupScreenState extends State<SetupScreen> {
     await IdentityService.instance.create(name, password);
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('profile.name', name);
+    // Remembered by default so the app opens straight into the chats; the
+    // user can switch to being asked every time in the settings.
+    await PasswordVault.instance.remember(password);
     await _startServices();
     if (!mounted) return;
     Navigator.pushAndRemoveUntil(
@@ -222,7 +227,16 @@ class UnlockScreen extends StatefulWidget {
 class _UnlockScreenState extends State<UnlockScreen> {
   final _passwordController = TextEditingController();
   bool _working = false;
+  bool _rememberMe = true;
   String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    PasswordVault.instance.askEveryOpen().then((ask) {
+      if (mounted) setState(() => _rememberMe = !ask);
+    });
+  }
 
   @override
   void dispose() {
@@ -243,6 +257,10 @@ class _UnlockScreenState extends State<UnlockScreen> {
         _error = 'Wrong password, try again.';
       });
       return;
+    }
+    await PasswordVault.instance.setAskEveryOpen(!_rememberMe);
+    if (_rememberMe) {
+      await PasswordVault.instance.remember(_passwordController.text);
     }
     await _startServices();
     if (!mounted) return;
@@ -284,6 +302,18 @@ class _UnlockScreenState extends State<UnlockScreen> {
                     onSubmitted: (_) => _unlock(),
                   ),
                 ),
+                CheckboxListTile(
+                  value: _rememberMe,
+                  onChanged: (value) =>
+                      setState(() => _rememberMe = value ?? true),
+                  title: const Text('Remember me'),
+                  subtitle: const Text(
+                      'Keeps your password in this device\'s keystore so '
+                      'ChatNyto opens straight into your chats.',
+                      style: TextStyle(fontSize: 12)),
+                  controlAffinity: ListTileControlAffinity.leading,
+                  contentPadding: EdgeInsets.zero,
+                ),
                 if (_error != null)
                   Padding(
                     padding: const EdgeInsets.only(top: 12),
@@ -316,6 +346,7 @@ class _UnlockScreenState extends State<UnlockScreen> {
 /// Connects brokers, advertises the identity and starts the chat service —
 /// everything the app needs, with zero user configuration.
 Future<void> _startServices() async {
+  await NotificationService.instance.init();
   await BrokerService.instance.ensureDefaults();
   await ChatService.instance.init();
   // Fire and forget: connect whatever network is reachable.

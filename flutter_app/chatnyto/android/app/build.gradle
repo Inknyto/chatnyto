@@ -27,12 +27,16 @@ if (flutterVersionName == null) {
 android {
     namespace = "com.example.chatnyto"
     compileSdk = flutter.compileSdkVersion
-    // ndkVersion intentionally not set: no plugin ships native code, and
-    // setting it makes AGP download the whole NDK.
+    // path_provider_android pulls in jni_flutter, which ships native code
+    // and requires this NDK; without the pin AGP resolves a different one
+    // and warns on every build.
+    ndkVersion = "28.2.13676358"
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
+        // Required by flutter_local_notifications.
+        coreLibraryDesugaringEnabled = true
     }
 
     kotlinOptions {
@@ -61,4 +65,8 @@ android {
 
 flutter {
     source = "../.."
+}
+
+dependencies {
+    coreLibraryDesugaring "com.android.tools:desugar_jdk_libs:2.1.4"
 }

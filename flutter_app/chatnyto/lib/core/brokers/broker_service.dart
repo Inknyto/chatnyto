@@ -1,5 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:mqtt_client/mqtt_client.dart';
@@ -17,6 +19,7 @@ class Broker {
     this.port = 1883,
     this.username = '',
     this.password = '',
+    this.autoConnect = true,
   });
 
   final String name;
@@ -25,12 +28,27 @@ class Broker {
   final String username;
   final String password;
 
+  /// Whether the app reconnects to this broker on its own (at startup, on
+  /// every heartbeat and when the network comes back). Toggling a broker
+  /// off in the UI clears this, so connection state survives restarts.
+  final bool autoConnect;
+
+  Broker copyWith({bool? autoConnect}) => Broker(
+        name: name,
+        host: host,
+        port: port,
+        username: username,
+        password: password,
+        autoConnect: autoConnect ?? this.autoConnect,
+      );
+
   Map<String, dynamic> toJson() => {
         'name': name,
         'host': host,
         'port': port,
         if (username.isNotEmpty) 'user': username,
         if (password.isNotEmpty) 'pass': password,
+        'auto': autoConnect,
       };
 
   static Broker fromJson(Map<String, dynamic> json) => Broker(
@@ -39,7 +57,18 @@ class Broker {
         port: (json['port'] as num?)?.toInt() ?? 1883,
         username: json['user'] as String? ?? '',
         password: json['pass'] as String? ?? '',
+        autoConnect: json['auto'] as bool? ?? true,
       );
+}
+
+/// An MQTT broker found by scanning the network the device is on.
+class DiscoveredBroker {
+  DiscoveredBroker({required this.host, required this.port});
+
+  final String host;
+  final int port;
+
+  String get label => port == 1883 ? host : '$host:$port';
 }
 
 const presenceTopicPrefix = 'chatnyto/presence';
@@ -48,11 +77,21 @@ const groupsTopicPrefix = 'chatnyto/groups';
 
 /// A public group advertised on the mesh.
 class PublicGroupAd {
-  PublicGroupAd({required this.slug, required this.name, required this.seenAt});
+  PublicGroupAd({
+    required this.slug,
+    required this.name,
+    required this.seenAt,
+    this.creatorKey = '',
+  });
 
   final String slug;
   final String name;
   final DateTime seenAt;
+
+  /// Base64 Ed25519 public key of whoever created the group. Members record
+  /// it when they join and only accept rename/delete instructions signed
+  /// with it.
+  final String creatorKey;
 }
 
 /// Keeps the user's broker list (add by name / remove), manages one MQTT
@@ -64,6 +103,7 @@ class BrokerService extends ChangeNotifier {
   static final BrokerService instance = BrokerService._();
 
   static const _prefKey = 'brokers.v1';
+  static const _autoConnectPrefKey = 'networks.autoConnect';
 
   final List<Broker> _brokers = [];
   final Map<String, MqttServerClient> _clients = {};
@@ -120,6 +160,29 @@ class BrokerService extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Remembers whether a broker should be reconnected automatically, so the
+  /// set of connected networks survives an app restart.
+  Future<void> setAutoConnect(Broker broker, bool enabled) async {
+    final index = _brokers.indexWhere((b) => b.name == broker.name);
+    if (index == -1) return;
+    _brokers[index] = _brokers[index].copyWith(autoConnect: enabled);
+    await _save();
+    notifyListeners();
+  }
+
+  /// Master switch for automatic (re)connection of every network.
+  Future<bool> autoConnectEnabled() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_autoConnectPrefKey) ?? true;
+  }
+
+  Future<void> setAutoConnectEnabled(bool enabled) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_autoConnectPrefKey, enabled);
+    if (enabled) await autoConnectAll();
+    notifyListeners();
+  }
+
   Future<void> removeBroker(Broker broker) async {
     await disconnect(broker);
     _brokers.removeWhere((b) => b.name == broker.name);
@@ -169,19 +232,7 @@ class BrokerService extends ChangeNotifier {
           continue;
         }
         if (event.topic.startsWith(groupsTopicPrefix)) {
-          try {
-            final json = jsonDecode(utf8.decode(payload.payload.message))
-                as Map<String, dynamic>;
-            final slug = json['slug'] as String?;
-            final name = json['name'] as String?;
-            if (slug != null && name != null) {
-              _publicGroups[slug] = PublicGroupAd(
-                  slug: slug, name: name, seenAt: DateTime.now());
-              notifyListeners();
-            }
-          } catch (_) {
-            // Ignore malformed group announcements.
-          }
+          _handleGroupAd(event.topic, payload.payload.message);
           continue;
         }
         if (!event.topic.startsWith(presenceTopicPrefix)) continue;
@@ -205,6 +256,51 @@ class BrokerService extends ChangeNotifier {
     await advertiseIdentity(broker);
     notifyListeners();
     return true;
+  }
+
+  /// Tracks the public groups announced on `chatnyto/groups/<slug>`. An
+  /// empty payload clears the retained announcement — that's how a creator
+  /// withdraws a group after deleting or renaming it.
+  void _handleGroupAd(String topic, List<int> raw) {
+    final slug = topic.substring(topic.lastIndexOf('/') + 1);
+    if (slug.isEmpty) return;
+    if (raw.isEmpty) {
+      if (_publicGroups.remove(slug) != null) notifyListeners();
+      return;
+    }
+    try {
+      final json = jsonDecode(utf8.decode(raw)) as Map<String, dynamic>;
+      final name = json['name'] as String?;
+      if (name == null || name.isEmpty) {
+        if (_publicGroups.remove(slug) != null) notifyListeners();
+        return;
+      }
+      _publicGroups[json['slug'] as String? ?? slug] = PublicGroupAd(
+        slug: json['slug'] as String? ?? slug,
+        name: name,
+        seenAt: DateTime.now(),
+        creatorKey: json['creator'] as String? ?? '',
+      );
+      notifyListeners();
+    } catch (_) {
+      // Ignore malformed group announcements.
+    }
+  }
+
+  /// Removes a retained group announcement from every connected broker.
+  void clearGroupAd(String slug) {
+    for (final client in _clients.values) {
+      if (client.connectionStatus?.state == MqttConnectionState.connected) {
+        client.publishMessage(
+          '$groupsTopicPrefix/$slug',
+          MqttQos.atLeastOnce,
+          MqttClientPayloadBuilder().payload!,
+          retain: true,
+        );
+      }
+    }
+    _publicGroups.remove(slug);
+    notifyListeners();
   }
 
   Future<void> disconnect(Broker broker) async {
@@ -240,12 +336,14 @@ class BrokerService extends ChangeNotifier {
   }
 
   /// Publishes [payload] on [topic] over every connected broker — the
-  /// caller never needs to know which broker carries the message.
-  void publishToAll(String topic, String payload) {
+  /// caller never needs to know which broker carries the message. Set
+  /// [retain] for announcements that late joiners must still receive.
+  void publishToAll(String topic, String payload, {bool retain = false}) {
     final builder = MqttClientPayloadBuilder()..addString(payload);
     for (final client in _clients.values) {
       if (client.connectionStatus?.state == MqttConnectionState.connected) {
-        client.publishMessage(topic, MqttQos.atLeastOnce, builder.payload!);
+        client.publishMessage(topic, MqttQos.atLeastOnce, builder.payload!,
+            retain: retain);
       }
     }
   }
@@ -261,15 +359,114 @@ class BrokerService extends ChangeNotifier {
     await addBroker(Broker(name: 'This device', host: '127.0.0.1'));
   }
 
-  /// Tries to connect every registered broker; failures are silent so the
-  /// app keeps working with whichever network is reachable.
+  /// Tries to connect every registered broker the user hasn't switched off;
+  /// failures are silent so the app keeps working with whichever network is
+  /// reachable.
   Future<void> autoConnectAll() async {
     await load();
+    if (!await autoConnectEnabled()) return;
     for (final broker in List<Broker>.from(_brokers)) {
-      if (!isConnected(broker)) {
+      if (broker.autoConnect && !isConnected(broker)) {
         await connect(broker);
       }
     }
+  }
+
+  // ------------------------------------------------------------- discovery
+
+  /// Scans the networks this device is on for reachable MQTT brokers, so a
+  /// user can join a broker somebody else is running without being told its
+  /// address. Every candidate is verified with a real MQTT handshake, not
+  /// just an open port.
+  Future<List<DiscoveredBroker>> discoverLocalBrokers({
+    int port = 1883,
+    void Function(double progress)? onProgress,
+  }) async {
+    final subnets = <String>{};
+    try {
+      final interfaces =
+          await NetworkInterface.list(type: InternetAddressType.IPv4);
+      for (final interface in interfaces) {
+        for (final address in interface.addresses) {
+          if (address.isLoopback) continue;
+          final parts = address.address.split('.');
+          if (parts.length == 4) {
+            subnets.add('${parts[0]}.${parts[1]}.${parts[2]}');
+          }
+        }
+      }
+    } catch (_) {
+      // No network interfaces available; fall through to the defaults.
+    }
+    // The Heltec broker's own access point, even when we're not on it yet.
+    subnets.add('192.168.4');
+
+    final found = <DiscoveredBroker>[];
+    final hosts = [
+      for (final subnet in subnets)
+        for (var i = 1; i <= 254; i++) '$subnet.$i',
+    ];
+    const batchSize = 48;
+    for (var start = 0; start < hosts.length; start += batchSize) {
+      final batch = hosts.skip(start).take(batchSize);
+      final results = await Future.wait(
+        batch.map((host) async => await _probeMqtt(host, port) ? host : null),
+      );
+      for (final host in results.whereType<String>()) {
+        found.add(DiscoveredBroker(host: host, port: port));
+      }
+      onProgress?.call((start + batchSize) / hosts.length);
+    }
+    return found;
+  }
+
+  /// Opens a TCP connection and performs an MQTT CONNECT/CONNACK exchange.
+  /// A broker that refuses the connection (bad credentials, for instance)
+  /// still answers with a CONNACK, so it counts as found.
+  static Future<bool> _probeMqtt(String host, int port) async {
+    Socket? socket;
+    try {
+      socket = await Socket.connect(host, port,
+          timeout: const Duration(milliseconds: 500));
+      const clientId = 'chatnyto-scan';
+      final idBytes = utf8.encode(clientId);
+      final variableHeader = <int>[
+        0x00, 0x04, 0x4D, 0x51, 0x54, 0x54, // "MQTT"
+        0x04, // protocol level 3.1.1
+        0x02, // clean session
+        0x00, 0x0A, // keep alive 10s
+      ];
+      final payload = <int>[
+        (idBytes.length >> 8) & 0xFF,
+        idBytes.length & 0xFF,
+        ...idBytes,
+      ];
+      final body = [...variableHeader, ...payload];
+      socket.add(Uint8List.fromList([0x10, ..._remainingLength(body.length), ...body]));
+      await socket.flush();
+      final response = await socket
+          .timeout(const Duration(milliseconds: 700))
+          .first
+          .catchError((_) => Uint8List(0));
+      // CONNACK has packet type 2 in the high nibble of the first byte.
+      return response.isNotEmpty && (response[0] & 0xF0) == 0x20;
+    } catch (_) {
+      return false;
+    } finally {
+      socket?.destroy();
+    }
+  }
+
+  static List<int> _remainingLength(int length) {
+    final bytes = <int>[];
+    var remaining = length;
+    do {
+      var byte = remaining % 128;
+      remaining ~/= 128;
+      if (remaining > 0) byte |= 0x80;
+      bytes.add(byte);
+    } while (remaining > 0);
+    return bytes;
   }
 
   /// Periodic heartbeat: re-advertises presence (brokers without retained-

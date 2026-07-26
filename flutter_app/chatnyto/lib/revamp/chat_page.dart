@@ -1,9 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_quill/flutter_quill.dart' as quill;
 
+import '../core/brokers/broker_service.dart';
 import '../core/crypto/crypto_service.dart';
+import '../core/media/image_service.dart';
+import '../core/notifications/notification_service.dart';
 import '../core/settings/wallpaper_picker.dart';
 import '../core/theme/background_controller.dart';
+import '../core/widgets/connection_status.dart';
 import '../core/widgets/liquid_glass.dart';
 import '../core/widgets/wa_components.dart';
 import 'chat_service.dart';
@@ -21,22 +26,36 @@ class RevampChatPage extends StatefulWidget {
 
 class _RevampChatPageState extends State<RevampChatPage> {
   final ChatService _service = ChatService.instance;
-  final TextEditingController _textController = TextEditingController();
+  final quill.QuillController _editorController =
+      quill.QuillController.basic();
   final ScrollController _scrollController = ScrollController();
+  final ScrollController _editorScrollController = ScrollController();
+  final FocusNode _editorFocus = FocusNode();
   List<RevampMessage> _messages = [];
   String _myFp = '';
+  bool _showToolbar = false;
+  bool _isOwner = false;
+  bool _canAdminister = false;
+  bool _sendingImage = false;
 
   @override
   void initState() {
     super.initState();
+    // Suppress notifications for the conversation the user is looking at.
+    NotificationService.instance.activeChatId = widget.chat.id;
     _load();
     _service.addListener(_onChanged);
   }
 
   @override
   void dispose() {
+    if (NotificationService.instance.activeChatId == widget.chat.id) {
+      NotificationService.instance.activeChatId = null;
+    }
     _service.removeListener(_onChanged);
-    _textController.dispose();
+    _editorController.dispose();
+    _editorScrollController.dispose();
+    _editorFocus.dispose();
     _scrollController.dispose();
     super.dispose();
   }
@@ -46,10 +65,17 @@ class _RevampChatPageState extends State<RevampChatPage> {
       _myFp =
           (await IdentityService.instance.publicIdentity()).fingerprint;
     }
+    final owner = await _service.isGroupOwner(widget.chat);
+    final admin = await _service.canAdministerGroup(widget.chat);
     final messages = await _service.messagesFor(widget.chat);
     _service.markRead(widget.chat);
+    NotificationService.instance.activeChatId = widget.chat.id;
     if (mounted) {
-      setState(() => _messages = List.of(messages));
+      setState(() {
+        _messages = List.of(messages);
+        _isOwner = owner;
+        _canAdminister = admin;
+      });
       _scrollToEnd();
     }
   }
@@ -66,9 +92,18 @@ class _RevampChatPageState extends State<RevampChatPage> {
   }
 
   Future<void> _send() async {
-    final text = _textController.text.trim();
+    final document = _editorController.document;
+    final text = document.toPlainText().trim();
     if (text.isEmpty) return;
-    final sent = await _service.sendText(widget.chat, text);
+    final delta = document.toDelta().toJson();
+    // Only carry the formatting when there actually is some, so plain
+    // messages stay small on a LoRa link.
+    final formatted = delta.any((op) => op['attributes'] != null);
+    final sent = await _service.sendText(
+      widget.chat,
+      text,
+      delta: formatted ? delta : null,
+    );
     if (!sent && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -78,7 +113,213 @@ class _RevampChatPageState extends State<RevampChatPage> {
       );
       return;
     }
-    _textController.clear();
+    _editorController.clear();
+  }
+
+  /// Renaming a group moves the whole conversation to a new topic, so it is
+  /// restricted to the person who created it.
+  Future<void> _renameGroup() async {
+    final controller = TextEditingController(text: widget.chat.title);
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Rename group'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(controller: controller, autofocus: true),
+            const SizedBox(height: 8),
+            const Text(
+              'The group name is its address on the network: everyone in '
+              'the group moves to the new one automatically.',
+              style: TextStyle(fontSize: 12),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Rename'),
+          ),
+        ],
+      ),
+    );
+    if (saved != true) return;
+    final error = await _service.renameChat(widget.chat, controller.text);
+    if (!mounted) return;
+    if (error != null) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(error)));
+    } else {
+      setState(() {});
+    }
+  }
+
+  /// Attaches a picture: it is shrunk to a link-friendly size and sent in
+  /// the same end-to-end encrypted envelope as a text message, using
+  /// whatever is currently typed as its caption.
+  Future<void> _attachImage() async {
+    final source = await showModalBottomSheet<bool>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) => LiquidGlass(
+        margin: const EdgeInsets.all(12),
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.photo_library_rounded),
+              title: const Text('Choose a picture'),
+              onTap: () => Navigator.pop(sheetContext, false),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_camera_rounded),
+              title: const Text('Take a photo'),
+              onTap: () => Navigator.pop(sheetContext, true),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (source == null || !mounted) return;
+    setState(() => _sendingImage = true);
+    final encoded =
+        await ImageService.instance.pickAsBase64(fromCamera: source);
+    if (!mounted) return;
+    setState(() => _sendingImage = false);
+    if (encoded == null) return;
+    final caption = _editorController.document.toPlainText().trim();
+    final sent = await _service.sendText(
+      widget.chat,
+      caption.isEmpty ? _photoLabel : caption,
+      image: encoded,
+    );
+    if (!mounted) return;
+    if (!sent) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content: Text('Cannot send: unlock your identity first.')),
+      );
+      return;
+    }
+    _editorController.clear();
+  }
+
+  /// Creator-only: pick, among the people visible on the network, who else
+  /// may rename or delete this group.
+  Future<void> _manageAdmins() async {
+    final peers = BrokerService.instance.peers.toList()
+      ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+    final selected = Set<String>.from(widget.chat.admins);
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setSheetState) => AlertDialog(
+          title: const Text('Group admins'),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: peers.isEmpty
+                ? const Text(
+                    'Nobody else is visible on the network yet. Admins can '
+                    'be chosen once people appear in the People tab.')
+                : Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Text(
+                        'Admins can rename this group and delete it for '
+                        'everyone. Only you can change this list.',
+                        style: TextStyle(fontSize: 12),
+                      ),
+                      const SizedBox(height: 8),
+                      Flexible(
+                        child: ListView(
+                          shrinkWrap: true,
+                          children: [
+                            for (final peer in peers)
+                              CheckboxListTile(
+                                dense: true,
+                                title: Text(peer.name),
+                                subtitle: Text(peer.fingerprint,
+                                    style: const TextStyle(fontSize: 11)),
+                                value:
+                                    selected.contains(peer.ed25519PublicKey),
+                                onChanged: (checked) => setSheetState(() {
+                                  if (checked == true) {
+                                    selected.add(peer.ed25519PublicKey);
+                                  } else {
+                                    selected.remove(peer.ed25519PublicKey);
+                                  }
+                                }),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Save'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (saved != true) return;
+    final error =
+        await _service.setGroupAdmins(widget.chat, selected.toList());
+    if (!mounted) return;
+    if (error != null) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(error)));
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+            content: Text('${selected.length} admin(s) set for this group.')),
+      );
+    }
+  }
+
+  Future<void> _deleteGroup() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Delete "${widget.chat.title}"?'),
+        content: const Text(
+            'The group disappears for everyone who joined it, and its '
+            'messages are removed from this device.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Delete for everyone'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    final error = await _service.deleteGroupForEveryone(widget.chat);
+    if (!mounted) return;
+    if (error != null) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(error)));
+    } else {
+      Navigator.pop(context);
+    }
   }
 
   void _showIdentitySheet() {
@@ -167,15 +408,22 @@ class _RevampChatPageState extends State<RevampChatPage> {
             onTap: _showIdentitySheet,
             child: Row(
               children: [
-                CircleAvatar(
-                  backgroundColor: scheme.primaryContainer,
-                  child: Icon(
-                    widget.chat.isDm
-                        ? Icons.person_rounded
-                        : Icons.groups_rounded,
-                    color: scheme.onPrimaryContainer,
-                  ),
-                ),
+                Builder(builder: (context) {
+                  final picture = ImageService.decode(peer?.avatar);
+                  return CircleAvatar(
+                    backgroundColor: scheme.primaryContainer,
+                    backgroundImage:
+                        picture == null ? null : MemoryImage(picture),
+                    child: picture != null
+                        ? null
+                        : Icon(
+                            widget.chat.isDm
+                                ? Icons.person_rounded
+                                : Icons.groups_rounded,
+                            color: scheme.onPrimaryContainer,
+                          ),
+                  );
+                }),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Column(
@@ -193,7 +441,7 @@ class _RevampChatPageState extends State<RevampChatPage> {
                             const Icon(Icons.verified_rounded,
                                 color: Colors.greenAccent, size: 13),
                             const SizedBox(width: 4),
-                            Expanded(
+                            Flexible(
                               child: Text(
                                 peer.fingerprint,
                                 style: const TextStyle(fontSize: 11),
@@ -208,6 +456,8 @@ class _RevampChatPageState extends State<RevampChatPage> {
                                 color: scheme.onSurface.withOpacity(0.6),
                               ),
                             ),
+                          const SizedBox(width: 8),
+                          const ConnectionStatusChip(),
                         ],
                       ),
                     ],
@@ -234,6 +484,12 @@ class _RevampChatPageState extends State<RevampChatPage> {
                     await BackgroundController.instance
                         .selectForChat(widget.chat.id, null);
                     if (mounted) setState(() {});
+                  case 'rename':
+                    await _renameGroup();
+                  case 'delete':
+                    await _deleteGroup();
+                  case 'admins':
+                    await _manageAdmins();
                 }
               },
               itemBuilder: (context) => [
@@ -247,6 +503,16 @@ class _RevampChatPageState extends State<RevampChatPage> {
                   const PopupMenuItem(
                       value: 'wallpaper_reset',
                       child: Text('Use global wallpaper')),
+                if (_isOwner)
+                  const PopupMenuItem(
+                      value: 'admins', child: Text('Group admins')),
+                if (_canAdminister) ...[
+                  const PopupMenuItem(
+                      value: 'rename', child: Text('Rename group')),
+                  const PopupMenuItem(
+                      value: 'delete',
+                      child: Text('Delete group for everyone')),
+                ],
               ],
             ),
           ],
@@ -280,28 +546,77 @@ class _RevampChatPageState extends State<RevampChatPage> {
                                 color: scheme.primary,
                               ),
                             ),
-                          Text(message.text),
+                          _MessageBody(message: message),
                         ],
                       ),
                     );
                   },
                 ),
               ),
+              if (_showToolbar)
+                LiquidGlass(
+                  margin: const EdgeInsets.symmetric(horizontal: 6),
+                  child: quill.QuillSimpleToolbar(
+                    controller: _editorController,
+                    config: const quill.QuillSimpleToolbarConfig(
+                      showBoldButton: true,
+                      showItalicButton: true,
+                      showUnderLineButton: true,
+                      showStrikeThrough: true,
+                      showColorButton: true,
+                      showBackgroundColorButton: true,
+                      showListBullets: true,
+                      showListNumbers: true,
+                      showCodeBlock: true,
+                      showQuote: true,
+                      showFontFamily: false,
+                      showFontSize: false,
+                      showHeaderStyle: false,
+                      showIndent: false,
+                      showLink: false,
+                      showSearchButton: false,
+                      showAlignmentButtons: false,
+                      showDividers: false,
+                      showSubscript: false,
+                      showSuperscript: false,
+                    ),
+                  ),
+                ),
               WaInputBar(
                 onSend: _send,
+                leading: [
+                  IconButton(
+                    tooltip: 'Formatting',
+                    icon: Icon(_showToolbar
+                        ? Icons.keyboard_arrow_down_rounded
+                        : Icons.text_format_rounded),
+                    onPressed: () =>
+                        setState(() => _showToolbar = !_showToolbar),
+                  ),
+                  IconButton(
+                    tooltip: 'Send a picture',
+                    icon: _sendingImage
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child:
+                                CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.attach_file_rounded),
+                    onPressed: _sendingImage ? null : _attachImage,
+                  ),
+                ],
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 8, vertical: 4),
-                  child: TextField(
-                    controller: _textController,
-                    minLines: 1,
-                    maxLines: 5,
-                    decoration: const InputDecoration(
-                      border: InputBorder.none,
-                      filled: false,
-                      hintText: 'Message',
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  child: quill.QuillEditor(
+                    controller: _editorController,
+                    scrollController: _editorScrollController,
+                    focusNode: _editorFocus,
+                    config: const quill.QuillEditorConfig(
+                      placeholder: 'Message',
+                      expands: false,
+                      padding: EdgeInsets.zero,
                     ),
-                    onSubmitted: (_) => _send(),
                   ),
                 ),
               ),
@@ -310,5 +625,60 @@ class _RevampChatPageState extends State<RevampChatPage> {
         ),
       ),
     );
+  }
+}
+
+/// Preview text stored with a picture that has no caption.
+const _photoLabel = '📷 Photo';
+
+/// Renders a message body: the attached picture when there is one, a
+/// read-only Quill document when the sender used formatting, plain text
+/// otherwise (which is also what older clients and LoRa-sized messages
+/// carry).
+class _MessageBody extends StatelessWidget {
+  const _MessageBody({required this.message});
+
+  final RevampMessage message;
+
+  @override
+  Widget build(BuildContext context) {
+    final picture = ImageService.decode(message.image);
+    if (picture != null) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(10),
+            child: Image.memory(picture, fit: BoxFit.cover),
+          ),
+          if (message.text.isNotEmpty && message.text != _photoLabel)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Text(message.text),
+            ),
+        ],
+      );
+    }
+    if (!message.isRich) return Text(message.text);
+    try {
+      final controller = quill.QuillController(
+        document: quill.Document.fromJson(message.delta!),
+        selection: const TextSelection.collapsed(offset: 0),
+        readOnly: true,
+      );
+      return quill.QuillEditor(
+        controller: controller,
+        scrollController: ScrollController(),
+        focusNode: FocusNode(),
+        config: const quill.QuillEditorConfig(
+          showCursor: false,
+          padding: EdgeInsets.zero,
+        ),
+      );
+    } catch (_) {
+      // Malformed delta from another client: fall back to the plain text.
+      return Text(message.text);
+    }
   }
 }

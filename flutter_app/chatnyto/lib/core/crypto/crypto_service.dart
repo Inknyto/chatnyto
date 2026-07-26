@@ -81,18 +81,35 @@ class PublicIdentity {
     required this.x25519PublicKey,
     required this.ed25519PublicKey,
     required this.signature,
+    this.avatar = '',
   });
 
   final String name;
   final String x25519PublicKey; // base64
   final String ed25519PublicKey; // base64
-  final String signature; // base64 Ed25519 signature over name+x25519 key
+  final String signature; // base64 Ed25519 signature over the signed message
+
+  /// Optional profile picture, base64 JPEG. It is covered by the signature
+  /// so nobody can swap somebody else's face onto a verified identity.
+  final String avatar;
+
+  bool get hasAvatar => avatar.isNotEmpty;
+
+  /// What the Ed25519 signature covers. Without a picture this is the
+  /// original name+key form, so identities published by older builds still
+  /// verify.
+  Future<String> signedMessage() async {
+    if (avatar.isEmpty) return '$name:$x25519PublicKey';
+    final digest = await Sha256().hash(utf8.encode(avatar));
+    return '$name:$x25519PublicKey:${base64Encode(digest.bytes)}';
+  }
 
   Map<String, dynamic> toJson() => {
         'name': name,
         'x25519': x25519PublicKey,
         'ed25519': ed25519PublicKey,
         'sig': signature,
+        if (avatar.isNotEmpty) 'pic': avatar,
       };
 
   static PublicIdentity? fromJson(Map<String, dynamic> json) {
@@ -102,6 +119,7 @@ class PublicIdentity {
         x25519PublicKey: json['x25519'] as String,
         ed25519PublicKey: json['ed25519'] as String,
         signature: json['sig'] as String,
+        avatar: json['pic'] as String? ?? '',
       );
     } catch (_) {
       return null;
@@ -112,7 +130,7 @@ class PublicIdentity {
   Future<bool> verify() async {
     try {
       final ed = Ed25519();
-      final message = utf8.encode('$name:$x25519PublicKey');
+      final message = utf8.encode(await signedMessage());
       return ed.verify(
         message,
         signature: Signature(
@@ -276,21 +294,73 @@ class IdentityService {
     await prefs.remove(_prefKey);
   }
 
+  /// The profile picture advertised with this identity (base64 JPEG).
+  static const avatarPrefKey = 'profile.picture';
+
+  Future<String> _avatar() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(avatarPrefKey) ?? '';
+  }
+
   /// The public, self-signed advertisement of this identity.
   Future<PublicIdentity> publicIdentity() async {
     final xPub = await _x25519KeyPair!.extractPublicKey();
     final edPub = await _ed25519KeyPair!.extractPublicKey();
     final xB64 = base64Encode(xPub.bytes);
-    final signature = await Ed25519().sign(
-      utf8.encode('${_displayName!}:$xB64'),
-      keyPair: _ed25519KeyPair!,
-    );
-    return PublicIdentity(
+    final unsigned = PublicIdentity(
       name: _displayName!,
       x25519PublicKey: xB64,
       ed25519PublicKey: base64Encode(edPub.bytes),
-      signature: base64Encode(signature.bytes),
+      signature: '',
+      avatar: await _avatar(),
     );
+    final signature = await Ed25519().sign(
+      utf8.encode(await unsigned.signedMessage()),
+      keyPair: _ed25519KeyPair!,
+    );
+    return PublicIdentity(
+      name: unsigned.name,
+      x25519PublicKey: unsigned.x25519PublicKey,
+      ed25519PublicKey: unsigned.ed25519PublicKey,
+      signature: base64Encode(signature.bytes),
+      avatar: unsigned.avatar,
+    );
+  }
+
+  /// This device's Ed25519 public key, base64 — the stable identifier used
+  /// to prove authorship of group control messages (rename, delete).
+  Future<String> ed25519PublicKeyB64() async {
+    final edPub = await _ed25519KeyPair!.extractPublicKey();
+    return base64Encode(edPub.bytes);
+  }
+
+  /// Signs [message] with the Ed25519 identity key.
+  Future<String> signPayload(String message) async {
+    final signature = await Ed25519().sign(
+      utf8.encode(message),
+      keyPair: _ed25519KeyPair!,
+    );
+    return base64Encode(signature.bytes);
+  }
+
+  /// Verifies a signature produced by [signPayload] against the signer's
+  /// base64 Ed25519 public key.
+  static Future<bool> verifyPayload(
+      String message, String signatureB64, String publicKeyB64) async {
+    try {
+      return Ed25519().verify(
+        utf8.encode(message),
+        signature: Signature(
+          base64Decode(signatureB64),
+          publicKey: SimplePublicKey(
+            base64Decode(publicKeyB64),
+            type: KeyPairType.ed25519,
+          ),
+        ),
+      );
+    } catch (_) {
+      return false;
+    }
   }
 
   /// Derives the peer-to-peer channel key with [peer] via X25519 ECDH + HKDF.

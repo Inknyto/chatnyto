@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../media/image_service.dart';
+import '../theme/glass_controller.dart';
 import 'liquid_glass.dart';
 
 /// WhatsApp-clone components (chat list tile, message bubble, input bar)
@@ -17,6 +19,7 @@ class WaChatTile extends StatelessWidget {
     this.isSender = false,
     this.isRead = false,
     this.leadingIcon,
+    this.avatar,
     this.onTap,
     this.onLongPress,
   });
@@ -28,8 +31,31 @@ class WaChatTile extends StatelessWidget {
   final bool isSender;
   final bool isRead;
   final IconData? leadingIcon;
+
+  /// Base64 JPEG profile picture, when the person published one.
+  final String? avatar;
   final VoidCallback? onTap;
   final VoidCallback? onLongPress;
+
+  Widget _avatarWidget(ColorScheme scheme) {
+    final picture = ImageService.decode(avatar);
+    if (picture != null) {
+      return CircleAvatar(radius: 24, backgroundImage: MemoryImage(picture));
+    }
+    return CircleAvatar(
+      radius: 24,
+      backgroundColor: scheme.primaryContainer,
+      child: leadingIcon != null
+          ? Icon(leadingIcon, color: scheme.onPrimaryContainer)
+          : Text(
+              title.isEmpty ? '?' : title[0].toUpperCase(),
+              style: TextStyle(
+                color: scheme.onPrimaryContainer,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -40,19 +66,7 @@ class WaChatTile extends StatelessWidget {
       child: ListTile(
         onTap: onTap,
         onLongPress: onLongPress,
-        leading: CircleAvatar(
-          radius: 24,
-          backgroundColor: scheme.primaryContainer,
-          child: leadingIcon != null
-              ? Icon(leadingIcon, color: scheme.onPrimaryContainer)
-              : Text(
-                  title.isEmpty ? '?' : title[0].toUpperCase(),
-                  style: TextStyle(
-                    color: scheme.onPrimaryContainer,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-        ),
+        leading: _avatarWidget(scheme),
         title: Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
@@ -139,9 +153,25 @@ class WaMessageBubble extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final width = MediaQuery.of(context).size.width;
+    // Bubbles follow the same solidity slider as the rest of the glass.
+    return ValueListenableBuilder<double>(
+      valueListenable: GlassController.instance,
+      builder: (context, solidity, _) => _bubble(
+        context,
+        scheme,
+        isDark,
+        width,
+        (isDark ? 0.30 + 0.45 * solidity : 0.48 + 0.45 * solidity)
+            .clamp(0.0, 1.0),
+      ),
+    );
+  }
+
+  Widget _bubble(BuildContext context, ColorScheme scheme, bool isDark,
+      double width, double bubbleOpacity) {
     final bubbleColor = isMine
-        ? scheme.primaryContainer.withOpacity(isDark ? 0.55 : 0.75)
-        : scheme.surface.withOpacity(isDark ? 0.45 : 0.75);
+        ? scheme.primaryContainer.withOpacity(bubbleOpacity)
+        : scheme.surface.withOpacity(bubbleOpacity);
     return Align(
       alignment: isMine ? Alignment.centerRight : Alignment.centerLeft,
       child: ConstrainedBox(
