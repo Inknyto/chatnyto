@@ -3,7 +3,9 @@ import 'package:flutter/material.dart';
 
 import '../account/account_page.dart';
 import '../account/security_page.dart';
+import '../ai/ai_agents_page.dart';
 import '../ais/ais_page.dart';
+import '../calls/calls_tab.dart';
 import '../core/brokers/broker_service.dart';
 import '../core/brokers/brokers_page.dart';
 import '../core/crypto/crypto_service.dart';
@@ -13,6 +15,7 @@ import '../core/widgets/connection_status.dart';
 import '../core/widgets/liquid_glass.dart';
 import '../core/widgets/wa_components.dart';
 import '../humans/humans_page.dart';
+import '../l10n/app_localizations.dart';
 import '../robots/robots_page.dart';
 import 'chat_page.dart';
 import 'chat_service.dart';
@@ -29,22 +32,28 @@ class HomeShell extends StatefulWidget {
 class _HomeShellState extends State<HomeShell> {
   int _tab = 0;
 
-  static const _titles = ['ChatNyto', 'People', 'Updates', 'Communities'];
-
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    final titles = [
+      l10n.appTitle,
+      l10n.tabCalls,
+      l10n.tabPeople,
+      l10n.tabUpdates,
+      l10n.tabCommunities,
+    ];
     return GlassBackground(
       child: Scaffold(
         backgroundColor: Colors.transparent,
         appBar: AppBar(
           title: Text(
-            _titles[_tab],
+            titles[_tab],
             style: const TextStyle(fontWeight: FontWeight.bold),
           ),
           actions: [
             const ConnectionStatusChip(compact: true),
             IconButton(
-              tooltip: 'Toggle dark/light mode',
+              tooltip: l10n.toggleTheme,
               icon: Icon(
                 Theme.of(context).brightness == Brightness.dark
                     ? Icons.light_mode_rounded
@@ -65,12 +74,13 @@ class _HomeShellState extends State<HomeShell> {
                   Navigator.push(context, GlassPageRoute(page: page));
                 }
               },
-              itemBuilder: (context) => const [
-                PopupMenuItem(value: 'settings', child: Text('Settings')),
+              itemBuilder: (context) => [
                 PopupMenuItem(
-                    value: 'security', child: Text('Security & identity')),
+                    value: 'settings', child: Text(l10n.menuSettings)),
                 PopupMenuItem(
-                    value: 'brokers', child: Text('Networks')),
+                    value: 'security', child: Text(l10n.menuSecurity)),
+                PopupMenuItem(
+                    value: 'brokers', child: Text(l10n.menuNetworks)),
               ],
             ),
           ],
@@ -79,34 +89,41 @@ class _HomeShellState extends State<HomeShell> {
           index: _tab,
           children: const [
             ChatsTab(),
+            CallsTab(),
             PeopleTab(),
             UpdatesTab(),
             CommunitiesTab(),
           ],
         ),
         bottomNavigationBar: BottomNavigationBar(
+          type: BottomNavigationBarType.fixed,
           currentIndex: _tab,
           onTap: (index) => setState(() => _tab = index),
-          items: const [
+          items: [
             BottomNavigationBarItem(
-              icon: Icon(Icons.message_outlined),
-              activeIcon: Icon(Icons.message_rounded),
-              label: 'Chats',
+              icon: const Icon(Icons.message_outlined),
+              activeIcon: const Icon(Icons.message_rounded),
+              label: l10n.tabChats,
             ),
             BottomNavigationBarItem(
-              icon: Icon(Icons.people_alt_outlined),
-              activeIcon: Icon(Icons.people_alt_rounded),
-              label: 'People',
+              icon: const Icon(Icons.call_outlined),
+              activeIcon: const Icon(Icons.call_rounded),
+              label: l10n.tabCalls,
             ),
             BottomNavigationBarItem(
-              icon: Icon(Icons.notifications_outlined),
-              activeIcon: Icon(Icons.notifications_rounded),
-              label: 'Updates',
+              icon: const Icon(Icons.people_alt_outlined),
+              activeIcon: const Icon(Icons.people_alt_rounded),
+              label: l10n.tabPeople,
             ),
             BottomNavigationBarItem(
-              icon: Icon(Icons.groups_outlined),
-              activeIcon: Icon(Icons.groups_rounded),
-              label: 'Communities',
+              icon: const Icon(Icons.notifications_outlined),
+              activeIcon: const Icon(Icons.notifications_rounded),
+              label: l10n.tabUpdates,
+            ),
+            BottomNavigationBarItem(
+              icon: const Icon(Icons.groups_outlined),
+              activeIcon: const Icon(Icons.groups_rounded),
+              label: l10n.tabCommunities,
             ),
           ],
         ),
@@ -144,27 +161,28 @@ class _ChatsTabState extends State<ChatsTab> {
   }
 
   Future<void> _newGroup() async {
+    final l10n = AppLocalizations.of(context);
     final nameController = TextEditingController();
     final secretController = TextEditingController();
     final created = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('New group'),
+        title: Text(l10n.newGroup),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             TextField(
               controller: nameController,
               autofocus: true,
-              decoration: const InputDecoration(labelText: 'Group name'),
+              decoration: InputDecoration(labelText: l10n.groupName),
             ),
             const SizedBox(height: 8),
             TextField(
               controller: secretController,
               obscureText: true,
-              decoration: const InputDecoration(
-                labelText: 'Passphrase (optional)',
-                helperText: 'Only people with the passphrase can read',
+              decoration: InputDecoration(
+                labelText: l10n.groupPassphrase,
+                helperText: l10n.groupPassphraseHelp,
               ),
             ),
           ],
@@ -172,11 +190,11 @@ class _ChatsTabState extends State<ChatsTab> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
+            child: Text(l10n.cancel),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('Create'),
+            child: Text(l10n.create),
           ),
         ],
       ),
@@ -199,6 +217,7 @@ class _ChatsTabState extends State<ChatsTab> {
     final isOwner = await _service.canAdministerGroup(chat);
     final canRename = chat.isDm || isOwner;
     if (!mounted) return;
+    final l10n = AppLocalizations.of(context);
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
@@ -211,10 +230,9 @@ class _ChatsTabState extends State<ChatsTab> {
             if (canRename)
               ListTile(
                 leading: const Icon(Icons.edit_rounded),
-                title: Text(chat.isDm ? 'Rename' : 'Rename group'),
-                subtitle: chat.isDm
-                    ? null
-                    : const Text('Also moves the group to a new address'),
+                title: Text(chat.isDm ? l10n.rename : l10n.renameGroup),
+                subtitle:
+                    chat.isDm ? null : Text(l10n.renameGroupHelp),
                 onTap: () async {
                   Navigator.pop(sheetContext);
                   final controller =
@@ -223,7 +241,7 @@ class _ChatsTabState extends State<ChatsTab> {
                     context: context,
                     builder: (context) => AlertDialog(
                       title: Text(
-                          chat.isDm ? 'Rename chat' : 'Rename group'),
+                          chat.isDm ? l10n.renameChat : l10n.renameGroup),
                       content: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
@@ -231,10 +249,9 @@ class _ChatsTabState extends State<ChatsTab> {
                               controller: controller, autofocus: true),
                           if (!chat.isDm) ...[
                             const SizedBox(height: 8),
-                            const Text(
-                              'The name is the group\'s address on the '
-                              'network — everyone follows it automatically.',
-                              style: TextStyle(fontSize: 12),
+                            Text(
+                              l10n.renameGroupHelp,
+                              style: const TextStyle(fontSize: 12),
                             ),
                           ],
                         ],
@@ -262,7 +279,7 @@ class _ChatsTabState extends State<ChatsTab> {
               ),
             ListTile(
               leading: const Icon(Icons.wallpaper_rounded),
-              title: const Text('Wallpaper for this chat'),
+              title: Text(l10n.wallpaperForChat),
               onTap: () {
                 Navigator.pop(sheetContext);
                 Navigator.push(
@@ -276,7 +293,7 @@ class _ChatsTabState extends State<ChatsTab> {
               ListTile(
                 leading: const Icon(Icons.group_remove_rounded,
                     color: Colors.redAccent),
-                title: const Text('Delete group for everyone'),
+                title: Text(l10n.deleteGroupForEveryone),
                 subtitle: const Text('You administer this group'),
                 onTap: () async {
                   Navigator.pop(sheetContext);
@@ -312,7 +329,7 @@ class _ChatsTabState extends State<ChatsTab> {
             ListTile(
               leading:
                   const Icon(Icons.delete_rounded, color: Colors.redAccent),
-              title: Text(chat.isDm ? 'Delete chat' : 'Leave group'),
+              title: Text(chat.isDm ? l10n.deleteChat : l10n.leaveGroup),
               onTap: () async {
                 Navigator.pop(sheetContext);
                 final remove = await showDialog<bool>(
@@ -321,8 +338,7 @@ class _ChatsTabState extends State<ChatsTab> {
                     title: Text(chat.isDm
                         ? 'Delete "${chat.title}"?'
                         : 'Leave "${chat.title}"?'),
-                    content: const Text(
-                        'Removes the chat and its messages on this device.'),
+                    content: Text(l10n.deleteLocalWarning),
                     actions: [
                       TextButton(
                         onPressed: () => Navigator.pop(context, false),
@@ -352,13 +368,12 @@ class _ChatsTabState extends State<ChatsTab> {
     return Scaffold(
       backgroundColor: Colors.transparent,
       body: chats.isEmpty
-          ? const Center(
+          ? Center(
               child: LiquidGlass(
-                margin: EdgeInsets.all(24),
-                padding: EdgeInsets.all(20),
+                margin: const EdgeInsets.all(24),
+                padding: const EdgeInsets.all(20),
                 child: Text(
-                  'No chats yet.\n\nFind someone in the People tab, or '
-                  'create a group with the button below.',
+                  AppLocalizations.of(context).chatsEmpty,
                   textAlign: TextAlign.center,
                 ),
               ),
@@ -378,8 +393,8 @@ class _ChatsTabState extends State<ChatsTab> {
                   avatar: chat.peerIdentity?.avatar,
                   subtitle: chat.lastMessage.isEmpty
                       ? (chat.isDm
-                          ? 'Say hello 👋'
-                          : 'Group · anyone with the name can join')
+                          ? AppLocalizations.of(context).sayHello
+                          : AppLocalizations.of(context).groupSubtitle)
                       : chat.lastMessage,
                   timeStamp: time,
                   unreadCount: chat.unread,
@@ -394,7 +409,7 @@ class _ChatsTabState extends State<ChatsTab> {
             ),
       floatingActionButton: FloatingActionButton(
         onPressed: _newGroup,
-        tooltip: 'New group',
+        tooltip: AppLocalizations.of(context).newGroup,
         child: const Icon(Icons.group_add_rounded),
       ),
     );
@@ -482,7 +497,7 @@ class _PeopleTabState extends State<PeopleTab> {
             const SizedBox(height: 16),
             FilledButton.icon(
               icon: const Icon(Icons.message_rounded),
-              label: const Text('Message'),
+              label: Text(AppLocalizations.of(context).message),
               onPressed: () async {
                 final chat = await ChatService.instance.startDm(peer);
                 if (context.mounted) {
@@ -523,10 +538,10 @@ class _PeopleTabState extends State<PeopleTab> {
               padding: const EdgeInsets.symmetric(horizontal: 12),
               radius: 24,
               child: TextField(
-                decoration: const InputDecoration(
-                  icon: Icon(Icons.search_rounded),
+                decoration: InputDecoration(
+                  icon: const Icon(Icons.search_rounded),
                   border: InputBorder.none,
-                  hintText: 'Search people by name',
+                  hintText: AppLocalizations.of(context).searchPeople,
                 ),
                 onChanged: (value) => setState(() => _query = value),
               ),
@@ -541,12 +556,12 @@ class _PeopleTabState extends State<PeopleTab> {
                   color: connected > 0 ? Colors.greenAccent : null,
                 ),
                 title: Text(connected > 0
-                    ? 'Connected — people appear automatically'
-                    : 'Searching for a network…'),
+                    ? AppLocalizations.of(context).connectedPeopleAppear
+                    : AppLocalizations.of(context).searchingNetwork),
                 subtitle: Text(connected > 0
-                    ? '$connected network(s) reachable'
-                    : 'Turn on the LoRa box or join the same WiFi, then '
-                        'people around you show up here.'),
+                    ? AppLocalizations.of(context)
+                        .networksReachable(connected)
+                    : AppLocalizations.of(context).turnOnLoraHint),
                 trailing: IconButton(
                   tooltip: 'Retry connections',
                   icon: const Icon(Icons.refresh_rounded),
@@ -560,7 +575,8 @@ class _PeopleTabState extends State<PeopleTab> {
             for (final peer in peers)
               WaChatTile(
                 title: peer.name,
-                subtitle: 'Verified · ${peer.fingerprint}',
+                subtitle: AppLocalizations.of(context)
+                    .verifiedKey(peer.fingerprint),
                 leadingIcon: null,
                 avatar: peer.avatar,
                 onTap: () => _showIdentity(peer),
@@ -571,10 +587,10 @@ class _PeopleTabState extends State<PeopleTab> {
                 child: GlassShimmer(count: 3),
               ),
             if (_brokers.publicGroups.isNotEmpty) ...[
-              const Padding(
-                padding: EdgeInsets.fromLTRB(8, 20, 8, 4),
-                child: Text('Public groups on the mesh',
-                    style: TextStyle(
+              Padding(
+                padding: const EdgeInsets.fromLTRB(8, 20, 8, 4),
+                child: Text(AppLocalizations.of(context).publicGroupsOnMesh,
+                    style: const TextStyle(
                         fontSize: 16, fontWeight: FontWeight.w600)),
               ),
               for (final group in _brokers.publicGroups
@@ -583,7 +599,8 @@ class _PeopleTabState extends State<PeopleTab> {
                       g.name.toLowerCase().contains(_query.toLowerCase())))
                 WaChatTile(
                   title: group.name,
-                  subtitle: 'Public group · tap to join',
+                  subtitle:
+                      AppLocalizations.of(context).publicGroupTapToJoin,
                   leadingIcon: Icons.groups_rounded,
                   onTap: () async {
                     final chat =
@@ -637,16 +654,17 @@ class _UpdatesTabState extends State<UpdatesTab> {
     return ListView(
       padding: const EdgeInsets.all(8),
       children: [
-        const Padding(
-          padding: EdgeInsets.fromLTRB(8, 8, 8, 4),
-          child: Text('Online now',
+        Padding(
+          padding: const EdgeInsets.fromLTRB(8, 8, 8, 4),
+          child: Text(AppLocalizations.of(context).onlineNow,
               style:
                   TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
         ),
         SizedBox(
           height: 92,
           child: peers.isEmpty
-              ? const Center(child: Text('Nobody on the network yet'))
+              ? Center(
+                  child: Text(AppLocalizations.of(context).nobodyYet))
               : ListView(
                   scrollDirection: Axis.horizontal,
                   padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -683,9 +701,9 @@ class _UpdatesTabState extends State<UpdatesTab> {
                 ),
         ),
         const Divider(),
-        const Padding(
-          padding: EdgeInsets.fromLTRB(8, 8, 8, 4),
-          child: Text('Networks',
+        Padding(
+          padding: const EdgeInsets.fromLTRB(8, 8, 8, 4),
+          child: Text(AppLocalizations.of(context).networks,
               style:
                   TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
         ),
@@ -702,7 +720,9 @@ class _UpdatesTabState extends State<UpdatesTab> {
               ),
               title: Text(broker.name),
               subtitle: Text(
-                  _brokers.isConnected(broker) ? 'Connected' : 'Unreachable'),
+                  _brokers.isConnected(broker)
+                      ? AppLocalizations.of(context).connected
+                      : AppLocalizations.of(context).unreachable),
             ),
           ),
       ],
@@ -736,20 +756,31 @@ class CommunitiesTab extends StatelessWidget {
       children: [
         tile(
           Icons.people_alt_rounded,
-          'People',
-          'Classic rooms with rich-text messages',
+          AppLocalizations.of(context).communityPeople,
+          AppLocalizations.of(context).communityPeopleSub,
           const HumansPage(),
         ),
         tile(
           Icons.devices_other_rounded,
-          'IoT devices',
-          'Securely talk to your connected devices',
+          AppLocalizations.of(context).communityIot,
+          AppLocalizations.of(context).communityIotSub,
           const RobotsPage(),
         ),
         tile(
           Icons.auto_awesome_rounded,
-          'AI agents',
-          'Local and cloud AI assistants',
+          AppLocalizations.of(context).communityAi,
+          AppLocalizations.of(context).communityAiSub,
+          const AiAgentsPage(),
+        ),
+        const Padding(
+          padding: EdgeInsets.fromLTRB(16, 18, 16, 6),
+          child: Text('Classic rooms',
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+        ),
+        tile(
+          Icons.forum_outlined,
+          'MQTT rooms (old app)',
+          'The original broker/topic screens',
           const AIsPage(),
         ),
       ],

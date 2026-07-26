@@ -4,8 +4,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../core/brokers/broker_service.dart';
 import '../core/crypto/crypto_service.dart';
 import '../core/crypto/password_vault.dart';
+import '../core/notifications/background_service.dart';
 import '../core/notifications/notification_service.dart';
 import '../core/widgets/liquid_glass.dart';
+import '../l10n/app_localizations.dart';
 import 'chat_service.dart';
 import 'home_shell.dart';
 
@@ -18,6 +20,7 @@ class WelcomeScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final l10n = AppLocalizations.of(context);
     return GlassBackground(
       child: Scaffold(
         backgroundColor: Colors.transparent,
@@ -39,20 +42,19 @@ class WelcomeScreen extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 40),
-              const Text(
-                'Welcome to ChatNyto',
-                style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold),
+              Text(
+                l10n.welcomeTitle,
+                style: const TextStyle(
+                    fontSize: 26, fontWeight: FontWeight.bold),
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 16),
-              const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 32),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 32),
                 child: Text(
-                  'Easy, secure connections between people, AI agents and '
-                  'IoT devices — with or without internet. Everything is '
-                  'end-to-end encrypted.',
+                  l10n.welcomeTagline,
                   textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 15),
+                  style: const TextStyle(fontSize: 15),
                 ),
               ),
               const Spacer(),
@@ -71,7 +73,7 @@ class WelcomeScreen extends StatelessWidget {
                       context,
                       GlassPageRoute(page: const SetupScreen()),
                     ),
-                    child: const Text('Agree and continue'),
+                    child: Text(l10n.welcomeContinue),
                   ),
                 ),
               ),
@@ -109,11 +111,12 @@ class _SetupScreenState extends State<SetupScreen> {
     final name = _nameController.text.trim();
     final password = _passwordController.text;
     if (name.isEmpty) {
-      setState(() => _error = 'Please enter your name.');
+      setState(() => _error = AppLocalizations.of(context).setupNameMissing);
       return;
     }
     if (password.length < 8) {
-      setState(() => _error = 'Password must be at least 8 characters.');
+      setState(
+          () => _error = AppLocalizations.of(context).setupPasswordShort);
       return;
     }
     setState(() {
@@ -137,10 +140,11 @@ class _SetupScreenState extends State<SetupScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     return GlassBackground(
       child: Scaffold(
         backgroundColor: Colors.transparent,
-        appBar: AppBar(title: const Text('Set up your profile')),
+        appBar: AppBar(title: Text(l10n.setupTitle)),
         body: SafeArea(
           child: ListView(
             padding: const EdgeInsets.all(24),
@@ -158,9 +162,9 @@ class _SetupScreenState extends State<SetupScreen> {
                   children: [
                     TextField(
                       controller: _nameController,
-                      decoration: const InputDecoration(
-                        labelText: 'Your name',
-                        helperText: 'Visible to people you chat with',
+                      decoration: InputDecoration(
+                        labelText: l10n.setupName,
+                        helperText: l10n.setupNameHelp,
                       ),
                       textInputAction: TextInputAction.next,
                     ),
@@ -168,10 +172,9 @@ class _SetupScreenState extends State<SetupScreen> {
                     TextField(
                       controller: _passwordController,
                       obscureText: true,
-                      decoration: const InputDecoration(
-                        labelText: 'Password',
-                        helperText:
-                            'Protects your encryption keys on this device',
+                      decoration: InputDecoration(
+                        labelText: l10n.setupPassword,
+                        helperText: l10n.setupPasswordHelp,
                       ),
                       onSubmitted: (_) => _finish(),
                     ),
@@ -202,15 +205,13 @@ class _SetupScreenState extends State<SetupScreen> {
                         width: 20,
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
-                    : const Text('Start chatting'),
+                    : Text(l10n.setupStart),
               ),
               const SizedBox(height: 12),
-              const Text(
-                'A secure identity (encryption keys) is created for you '
-                'automatically. No account, no phone number, no servers to '
-                'configure.',
+              Text(
+                l10n.setupFootnote,
                 textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 12),
+                style: const TextStyle(fontSize: 12),
               ),
             ],
           ),
@@ -258,7 +259,7 @@ class _UnlockScreenState extends State<UnlockScreen> {
     if (!ok) {
       setState(() {
         _working = false;
-        _error = 'Wrong password, try again.';
+        _error = AppLocalizations.of(context).unlockWrong;
       });
       return;
     }
@@ -277,6 +278,7 @@ class _UnlockScreenState extends State<UnlockScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     return GlassBackground(
       child: Scaffold(
         backgroundColor: Colors.transparent,
@@ -288,10 +290,10 @@ class _UnlockScreenState extends State<UnlockScreen> {
               children: [
                 const Icon(Icons.lock_rounded, size: 64),
                 const SizedBox(height: 16),
-                const Text(
-                  'Welcome back',
-                  style:
-                      TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+                Text(
+                  l10n.unlockTitle,
+                  style: const TextStyle(
+                      fontSize: 22, fontWeight: FontWeight.bold),
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 24),
@@ -302,7 +304,7 @@ class _UnlockScreenState extends State<UnlockScreen> {
                     obscureText: true,
                     autofocus: true,
                     decoration:
-                        const InputDecoration(labelText: 'Password'),
+                        InputDecoration(labelText: l10n.setupPassword),
                     onSubmitted: (_) => _unlock(),
                   ),
                 ),
@@ -310,11 +312,9 @@ class _UnlockScreenState extends State<UnlockScreen> {
                   value: _rememberMe,
                   onChanged: (value) =>
                       setState(() => _rememberMe = value ?? true),
-                  title: const Text('Remember me'),
-                  subtitle: const Text(
-                      'Keeps your password in this device\'s keystore so '
-                      'ChatNyto opens straight into your chats.',
-                      style: TextStyle(fontSize: 12)),
+                  title: Text(l10n.rememberMe),
+                  subtitle: Text(l10n.rememberMeHelp,
+                      style: const TextStyle(fontSize: 12)),
                   controlAffinity: ListTileControlAffinity.leading,
                   contentPadding: EdgeInsets.zero,
                 ),
@@ -336,7 +336,7 @@ class _UnlockScreenState extends State<UnlockScreen> {
                           width: 20,
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
-                      : const Text('Unlock'),
+                      : Text(l10n.unlockButton),
                 ),
               ],
             ),
@@ -351,6 +351,7 @@ class _UnlockScreenState extends State<UnlockScreen> {
 /// everything the app needs, with zero user configuration.
 Future<void> _startServices() async {
   await NotificationService.instance.init();
+  await BackgroundService.instance.startIfEnabled();
   await BrokerService.instance.ensureDefaults();
   await ChatService.instance.init();
   // Fire and forget: connect whatever network is reachable.

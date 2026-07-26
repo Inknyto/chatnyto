@@ -173,9 +173,20 @@ Done:     * Discovery: BrokerService.discoverLocalBrokers scans every subnet the
 Done:       (plus the Heltec AP range 192.168.4.x) and confirms each candidate with a real MQTT
 Done:       CONNECT/CONNACK handshake rather than just an open port; "Find brokers on this
 Done:       network" lists what it finds for one-tap joining.
-Add a configuration option to the broker to set it to public or private.
-You can create services for the app to keep getting the messages even after you
-restart the app, or you are not currently using the app.
+Done: [x] DONE - The ESP32 broker can be public or private at runtime: the serial
+Done:     console gained `access`, which shows the current mode and switches it -
+Done:     `access public` lets anyone on the network connect, `access private <user>
+Done:     <password>` requires those credentials. The mode and credentials live in NVS
+Done:     and are checked on every CONNECT, so changing them needs no reboot and no
+Done:     rebuild; the menuconfig BROKER_AUTHENTICATION values remain the fallback.
+Done:     `info` reports the mode too.
+Done: [x] DONE - Background service: an Android foreground service
+Done:     (lib/core/notifications/background_service.dart, flutter_foreground_task) keeps
+Done:     the process - and with it the broker connections and their heartbeat - alive
+Done:     while the app is not in use, and restarts it after a reboot or an app update.
+Done:     It shows a quiet permanent notification, as Android requires, and Settings ->
+Done:     Networks -> "Stay connected in the background" turns it off. Messages that
+Done:     arrive this way raise notifications.
 Done: [x] DONE - Profile picture support: Settings -> Profile has a picture tile (pick,
 Done:     replace, remove). The image is downscaled to 128px JPEG, stored locally and advertised
 Done:     with the identity — and it is covered by the Ed25519 signature (the signed message
@@ -194,7 +205,12 @@ Done: [x] DONE - Liquid glass opacity: resting surfaces were too transparent, so
 Done:     default is now the denser shade that scrolling elements had, and Settings ->
 Done:     Preferences -> Glass opacity is a persistent slider (GlassController) driving every
 Done:     panel, bubble, bar and border across the app.
-Make the app customizable.
+Done: [x] DONE - Customisation, all persisted: light/dark theme, app language,
+Done:     glass opacity slider, an app-wide wallpaper, a chat-wide wallpaper and a
+Done:     per-chat override, profile picture, notification sound, which networks connect
+Done:     automatically, whether to stay connected in the background, whether the
+Done:     password is remembered, and per-agent AI settings (provider, model, endpoint,
+Done:     instructions, creativity, tools).
 Done: [x] DONE - The password is remembered by default in the platform keystore (Android
 Done:     EncryptedSharedPreferences / Keychain / libsecret / DPAPI via flutter_secure_storage,
 Done:     lib/core/crypto/password_vault.dart) so the app opens straight into the chats. The
@@ -205,16 +221,43 @@ Done:     designated get "Delete group for everyone" (chat menu and long-press),
 Done:     a signed 'group_delete' control message and clears the retained announcement; members
 Done:     verify the signature against the recorded creator/admin keys and drop the
 Done:     conversation. Everyone else only gets "Leave group", which removes it locally.
-You have to configure these files on this server for remote deployment. Here are the
-deployment scripts of an app already running on that same server: @deploy/ . You have to securely
-deploy a production level mqtt broker and make the app able to use it by entering the url of
-the current running app: supa-tech.com .
+Done: [x] DONE (configuration) - The deployment is fully configured, and the app can
+Done:     use such a broker by URL. NOT executed: running it publishes a service and
+Done:     needs the Cloudflare tunnel token plus the server credentials, so the final
+Done:     ./deploy/deploy-remote.sh is left for you to run.
+Done:     * deploy/docker-compose.yml - mosquitto 2.0 plus cloudflared. No port is
+Done:       published; the tunnel maps wss://<domain>/mqtt -> mqtt:9001, matching how
+Done:       the other service on that server is exposed.
+Done:     * deploy/mosquitto/config/ - authenticated users only (allow_anonymous false),
+Done:       an ACL restricting everyone to the chatnyto/# tree, connection logging off,
+Done:       message-size and queue caps, and both a plain 1883 listener (internal) and a
+Done:       9001 WebSocket listener (a raw MQTT port cannot cross an HTTP tunnel).
+Done:     * deploy/deploy.sh + deploy-remote.sh - rewritten for this stack (the ones in
+Done:       the repo were the storefront's). Secrets in deploy/.env.prod may be
+Done:       $(pass show ...); they resolve on your machine and stream to the server's
+Done:       tmpfs, never its disk. Accounts come from a single MQTT_USERS variable, so
+Done:       adding or removing someone is one edit plus `deploy-remote.sh users`.
+Done:     * deploy/.env.prod, deploy.conf and the generated passwd file are gitignored.
+Done:     * App side: broker hosts now accept mqtt://, mqtts://, ws:// and wss:// URLs
+Done:       (BrokerService._BrokerAddress), so entering wss://<domain>/mqtt with a
+Done:       username and password just works - or share it as a QR code.
+Done:     * deploy/README.md documents the setup, and is honest that a relay still sees
+Done:       connection metadata even though it only ever carries ciphertext.
 Done: [x] DONE - Connection status (connected/disconnected) like the old app:
 Done:     ConnectionStatusChip (lib/core/widgets/connection_status.dart) shows a live coloured
 Done:     dot in the home app bar and a dot plus wording under the name in the chat header,
 Done:     updating with the brokers.
-The old app files are in the comunities tab.
-Add full english/french support for the entire app via i18n
+Done: [x] DONE - Noted and made explicit: the Communities tab now has a "Classic
+Done:     rooms" section with "MQTT rooms (old app)" leading to the original
+Done:     broker/topic screens, so the old app is reachable but no longer the default
+Done:     path.
+Done: [x] DONE - Full English/French support via Flutter's i18n: lib/l10n/app_en.arb
+Done:     and app_fr.arb hold every user-facing string (~150 keys, including plural- and
+Done:     placeholder-bearing ones), generated into AppLocalizations and wired into
+Done:     MaterialApp. LocaleController persists the choice, and Settings -> Preferences
+Done:     -> Language switches between English, Français and the phone's own language
+Done:     with the app updating immediately. Home, onboarding, chats, networks,
+Done:     settings and the AI screens all read from the ARB files.
 Done: [x] DONE - Network map: Networks -> the hub icon opens a graph
 Done:     (lib/core/brokers/network_graph_page.dart) drawing this device at the centre, every
 Done:     registered network around it (green when connected, amber when unreachable, with a
@@ -230,10 +273,57 @@ Done: [x] DONE - Logo: assets/logo.png (plus a maskable foreground and every And
 Done:     launcher density) shows a person, an AI spark and a robot linked in a triangle around
 Done:     a chat bubble whose three dots carry their colours - the app connecting humans, robots
 Done:     and AIs. It is the launcher icon and greets you on the welcome screen.
-You have to develop the AI part of the app.
-Add mcp support and tools(skills). Research all current available AI APIs and add main AI
-providers as AI providers via BYOK (Bring Your Own Key).
-Think UI/UX first in any changes you make.
-If you have questions, do not write the code yet. Ask them first. If you do not have
-questions, write the complete code.
-Add phone calls as per @whatsapp_clone/
+Done: [x] DONE - The AI part (lib/ai/): Communities -> AI agents lists the agents you
+Done:     configure, each one a provider + model + instructions + creativity, and opens
+Done:     a chat in the same bubbles as the human ones with history kept on the device.
+Done:     AiClient speaks three wire protocols - OpenAI-compatible /chat/completions,
+Done:     Anthropic Messages and Gemini generateContent - so it covers the field, and it
+Done:     turns provider failures into plain advice ("the provider refused the API key")
+Done:     rather than raw HTTP errors.
+Done: [x] DONE - MCP and BYOK providers:
+Done:     * Providers (lib/ai/ai_provider.dart), all Bring Your Own Key: Anthropic,
+Done:       OpenAI, Google Gemini, Mistral, Groq, DeepSeek, xAI, OpenRouter, Ollama on
+Done:       your own machine (no key, works offline) and any other OpenAI-compatible
+Done:       server via a base URL. Keys are stored per provider in the device keystore
+Done:       (flutter_secure_storage), never in preferences and never with the agents,
+Done:       and the app calls each provider directly from the device. Model names are
+Done:       free text with suggestions, because they change faster than this app.
+Done:     * MCP (lib/ai/mcp_client.dart): a JSON-RPC client over the streamable HTTP
+Done:       transport - initialize, tools/list, tools/call - handling both plain JSON
+Done:       and SSE replies. Tool servers are configured in AI settings with a "test"
+Done:       button that lists what a server offers, enabled per agent, and their tools
+Done:       are exposed to all three protocols in each one's own schema. The client runs
+Done:       the tool loop (capped at 5 rounds) and shows every call and result inline in
+Done:       the conversation. stdio servers are out of scope - a phone cannot spawn
+Done:       processes - which is why servers are reached over HTTP.
+Done: [x] DONE (working rule, applied throughout) - Every addition was designed
+Done:     from the screen backwards: long-press for edit mode instead of instant delete,
+Done:     one-tap joining for discovered networks and groups, a scan button rather than
+Done:     typed addresses, plain-language errors, permissions asked only when the
+Done:     feature is used, and defaults chosen so a non-technical person never has to
+Done:     configure anything.
+Done: [x] DONE - Code written where the intent was clear, which was everywhere
+Done:     except one point that is reported rather than guessed: the production
+Done:     deployment is fully configured but not executed, because running it publishes
+Done:     a service and needs your Cloudflare tunnel token and server credentials. Say
+Done:     the word and it is one command.
+Done: [x] DONE - Voice calls, modelled on the clone's Calls screen (lib/calls/):
+Done:     * A Calls tab beside Chats with the call history (outgoing, incoming, missed
+Done:       in red, duration), call-back buttons and a "new call" button listing who is
+Done:       reachable; a call button also sits in every direct chat's header.
+Done:     * Full-screen call UI for ringing, connecting and connected, with mute,
+Done:       speaker, answer and decline, a live timer and the reminder that the call is
+Done:       end-to-end encrypted.
+Done:     * An incoming call interrupts whatever is on screen - the call page is pushed
+Done:       from a navigator key held by MyApp, not from any single screen.
+Done:     * How it works: signalling (ring, answer, decline, hang up, and the WebRTC
+Done:       offer/answer plus ICE candidates) travels inside the pair's existing
+Done:       end-to-end encrypted DM channel, so there is no call server and no account
+Done:       anywhere. The audio is a direct peer-to-peer WebRTC stream with no STUN or
+Done:       TURN configured, which is deliberate: on a shared network the two devices
+Done:       reach each other directly, and adding a public STUN server would be the
+Done:       app's only unsolicited internet connection.
+Done:     * Honest limit, stated in the UI: calls need both devices on the same IP
+Done:       network. A LoRa link carries a few kilobits per second, which is enough for
+Done:       messages but not for voice, so the picker says so rather than failing
+Done:       mysteriously.

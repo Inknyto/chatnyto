@@ -30,6 +30,9 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+  intl: any
 
 
   # The following adds the Cupertino Icons font to your application.
@@ -48,6 +51,8 @@ dependencies:
   image: ^4.3.0
   qr_flutter: ^4.1.0
   mobile_scanner: ^7.0.0
+  flutter_foreground_task: ^9.1.0
+  flutter_webrtc: ^1.5.2
 
 # flutter_secure_storage 10.3.1 pins its Windows implementation to a build
 # that requires win32 5.x, which in turn drags quill_native_bridge_windows
@@ -73,6 +78,7 @@ dev_dependencies:
 
 # The following section is specific to Flutter packages.
 flutter:
+  generate: true
 
   # The following line ensures that the Material Icons font is
   # included with your application, so that you can use the icons in

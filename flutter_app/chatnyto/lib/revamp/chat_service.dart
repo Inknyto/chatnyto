@@ -654,6 +654,23 @@ class ChatService extends ChangeNotifier {
     }
   }
 
+  /// Set by the call service; receives call signalling that arrived inside
+  /// an encrypted direct message.
+  Future<void> Function(ChatEntry chat, Map<String, dynamic> data)?
+      onCallSignal;
+
+  /// Sends call signalling (ring, answer, ICE, hang up) over [chat]'s
+  /// end-to-end encrypted channel. Never queued in the outbox: a call is
+  /// only meaningful while both sides are online.
+  Future<void> sendCallSignal(
+      ChatEntry chat, Map<String, dynamic> data) async {
+    final key = await _keyFor(chat);
+    if (key == null) return;
+    final envelope = await MessageCrypto.encryptEnvelope(
+        jsonEncode({'type': 'call', ...data}), key);
+    BrokerService.instance.publishToAll(chat.topic, envelope);
+  }
+
   /// Broadcasts, for every chat, the timestamp of the newest message we
   /// hold; online members reply by re-publishing what we're missing.
   Future<void> syncAll() async {
@@ -732,6 +749,12 @@ class ChatService extends ChangeNotifier {
     if (data['type'] == 'sync_req') {
       final since = (data['since'] as num?)?.toInt() ?? 0;
       _replayHistory(chat, since);
+      return;
+    }
+    if (data['type'] == 'call') {
+      // Ring/answer/ICE traffic rides inside the pair's encrypted channel,
+      // so calls need no server of their own.
+      await onCallSignal?.call(chat, data);
       return;
     }
     if (data['type'] == 'group_rename' ||

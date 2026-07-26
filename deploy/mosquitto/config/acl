@@ -1,0 +1,13 @@
+# Who may read and write what.
+#
+# Everything ChatNyto does lives under chatnyto/, so authenticated users get
+# that subtree and nothing else. The payloads are end-to-end encrypted, so a
+# shared subtree does not mean shared readable messages — but keeping the
+# rest of the broker closed avoids it being used as a general-purpose relay.
+
+# Authenticated users: full access to the app's tree.
+pattern readwrite chatnyto/#
+
+# A dedicated monitoring account, if you create one, may only read $SYS.
+user monitor
+topic read $SYS/#

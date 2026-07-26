@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../l10n/app_localizations.dart';
 import '../widgets/liquid_glass.dart';
 import 'broker_qr.dart';
 import 'broker_service.dart';
@@ -58,41 +59,46 @@ class _BrokersPageState extends State<BrokersPage> {
     final saved = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text(existing == null ? 'Add broker' : 'Edit broker'),
+        title: Text(existing == null
+            ? AppLocalizations.of(context).addBroker
+            : AppLocalizations.of(context).editBroker),
         content: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               TextField(
                 controller: nameController,
-                decoration: const InputDecoration(labelText: 'Name'),
+                decoration: InputDecoration(
+                    labelText: AppLocalizations.of(context).brokerName),
               ),
               const SizedBox(height: 8),
               TextField(
                 controller: hostController,
-                decoration:
-                    const InputDecoration(labelText: 'Host (IP or hostname)'),
+                decoration: InputDecoration(
+                    labelText: AppLocalizations.of(context).brokerHost),
               ),
               const SizedBox(height: 8),
               TextField(
                 controller: portController,
                 keyboardType: TextInputType.number,
-                decoration: const InputDecoration(labelText: 'Port'),
+                decoration: InputDecoration(
+                    labelText: AppLocalizations.of(context).brokerPort),
               ),
               const SizedBox(height: 8),
               TextField(
                 controller: userController,
-                decoration: const InputDecoration(
-                  labelText: 'Username (optional)',
-                  helperText: 'Only for password-protected brokers',
+                decoration: InputDecoration(
+                  labelText: AppLocalizations.of(context).brokerUsername,
+                  helperText:
+                      AppLocalizations.of(context).brokerUsernameHelp,
                 ),
               ),
               const SizedBox(height: 8),
               TextField(
                 controller: passController,
                 obscureText: true,
-                decoration:
-                    const InputDecoration(labelText: 'Password (optional)'),
+                decoration: InputDecoration(
+                    labelText: AppLocalizations.of(context).brokerPassword),
               ),
             ],
           ),
@@ -100,11 +106,13 @@ class _BrokersPageState extends State<BrokersPage> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
+            child: Text(AppLocalizations.of(context).cancel),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(context, true),
-            child: Text(existing == null ? 'Add' : 'Save'),
+            child: Text(existing == null
+                ? AppLocalizations.of(context).add
+                : AppLocalizations.of(context).save),
           ),
         ],
       ),
@@ -139,7 +147,7 @@ class _BrokersPageState extends State<BrokersPage> {
           children: [
             ListTile(
               leading: const Icon(Icons.edit_rounded),
-              title: const Text('Edit'),
+              title: Text(AppLocalizations.of(context).edit),
               onTap: () {
                 Navigator.pop(sheetContext);
                 _editBroker(broker);
@@ -147,7 +155,7 @@ class _BrokersPageState extends State<BrokersPage> {
             ),
             ListTile(
               leading: const Icon(Icons.qr_code_2_rounded),
-              title: const Text('Share by QR code'),
+              title: Text(AppLocalizations.of(context).shareByQr),
               onTap: () {
                 Navigator.pop(sheetContext);
                 Navigator.push(
@@ -159,7 +167,7 @@ class _BrokersPageState extends State<BrokersPage> {
             ListTile(
               leading:
                   const Icon(Icons.delete_rounded, color: Colors.redAccent),
-              title: const Text('Delete'),
+              title: Text(AppLocalizations.of(context).delete),
               onTap: () {
                 Navigator.pop(sheetContext);
                 _service.removeBroker(broker);
@@ -186,7 +194,9 @@ class _BrokersPageState extends State<BrokersPage> {
       final ok = await _service.connect(broker);
       if (!ok && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not connect to ${broker.name}')),
+          SnackBar(
+              content: Text(AppLocalizations.of(context)
+                  .couldNotConnect(broker.name))),
         );
       }
     }
@@ -229,8 +239,7 @@ class _BrokersPageState extends State<BrokersPage> {
     });
     if (found.isEmpty && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-            content: Text('No brokers found on this network.')),
+        SnackBar(content: Text(AppLocalizations.of(context).noBrokersFound)),
       );
     }
   }
@@ -250,6 +259,7 @@ class _BrokersPageState extends State<BrokersPage> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     final brokers = _service.brokers
         .where((b) => _matches('${b.name} ${b.host}'))
         .toList();
@@ -260,15 +270,15 @@ class _BrokersPageState extends State<BrokersPage> {
       child: Scaffold(
         backgroundColor: Colors.transparent,
         appBar: AppBar(
-          title: const Text('Networks'),
+          title: Text(l10n.networks),
           actions: [
             IconButton(
-              tooltip: 'Scan a network code',
+              tooltip: l10n.scanNetworkCode,
               icon: const Icon(Icons.qr_code_scanner_rounded),
               onPressed: _scanQr,
             ),
             IconButton(
-              tooltip: 'Network map',
+              tooltip: l10n.networkMap,
               icon: const Icon(Icons.hub_rounded),
               onPressed: () => Navigator.push(
                 context,
@@ -289,10 +299,10 @@ class _BrokersPageState extends State<BrokersPage> {
               padding: const EdgeInsets.symmetric(horizontal: 12),
               radius: 24,
               child: TextField(
-                decoration: const InputDecoration(
-                  icon: Icon(Icons.search_rounded),
+                decoration: InputDecoration(
+                  icon: const Icon(Icons.search_rounded),
                   border: InputBorder.none,
-                  hintText: 'Search networks and people',
+                  hintText: l10n.searchNetworks,
                 ),
                 onChanged: (value) => setState(() => _query = value),
               ),
@@ -303,7 +313,7 @@ class _BrokersPageState extends State<BrokersPage> {
                 children: [
                   SwitchListTile(
                     secondary: const Icon(Icons.autorenew_rounded),
-                    title: const Text('Connect automatically'),
+                    title: Text(l10n.connectAutomatically),
                     subtitle: const Text(
                         'Reconnect the networks you use as soon as they are '
                         'reachable, and stay connected in the background.'),
@@ -321,22 +331,18 @@ class _BrokersPageState extends State<BrokersPage> {
                             child: CircularProgressIndicator(strokeWidth: 2),
                           )
                         : const Icon(Icons.travel_explore_rounded),
-                    title: Text(_scanning
-                        ? 'Scanning this network…'
-                        : 'Find brokers on this network'),
-                    subtitle: const Text(
-                        'Looks for public MQTT brokers around you, including '
-                        'the LoRa box.'),
+                    title: Text(_scanning ? l10n.scanning : l10n.findBrokers),
+                    subtitle: Text(l10n.findBrokersHelp),
                     onTap: _scanning ? null : _scanNetwork,
                   ),
                 ],
               ),
             ),
             if (_discovered.isNotEmpty) ...[
-              const Padding(
-                padding: EdgeInsets.fromLTRB(4, 12, 4, 4),
-                child: Text('Found on this network',
-                    style: TextStyle(fontWeight: FontWeight.bold)),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(4, 12, 4, 4),
+                child: Text(l10n.foundOnNetwork,
+                    style: const TextStyle(fontWeight: FontWeight.bold)),
               ),
               for (final discovered in _discovered)
                 LiquidGlass(

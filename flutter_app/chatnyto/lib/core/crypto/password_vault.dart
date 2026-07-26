@@ -19,9 +19,7 @@ class PasswordVault {
   static const _askEveryTimeKey = 'security.askPasswordEveryOpen';
   static const _secureKey = 'identity.password';
 
-  static const FlutterSecureStorage _storage = FlutterSecureStorage(
-    aOptions: AndroidOptions(encryptedSharedPreferences: true),
-  );
+  static const FlutterSecureStorage _storage = FlutterSecureStorage();
 
   /// When true the password is never stored and is asked for at every
   /// app open. Off by default: the password is remembered.
