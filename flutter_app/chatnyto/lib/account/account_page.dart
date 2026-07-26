@@ -7,12 +7,15 @@ import '../core/brokers/brokers_page.dart';
 import '../core/crypto/crypto_service.dart';
 import '../core/crypto/password_vault.dart';
 import '../core/media/image_service.dart';
+import '../core/notifications/background_service.dart';
 import '../core/notifications/notification_service.dart';
 import '../core/settings/wallpaper_picker.dart';
 import '../core/theme/background_controller.dart';
 import '../core/theme/glass_controller.dart';
+import '../core/theme/locale_controller.dart';
 import '../core/theme/theme_controller.dart';
 import '../core/widgets/liquid_glass.dart';
+import '../l10n/app_localizations.dart';
 import 'security_page.dart';
 
 class AccountPage extends StatefulWidget {
@@ -30,6 +33,7 @@ class _AccountPageState extends State<AccountPage> {
   bool _autoConnect = true;
   String _avatar = '';
   NotificationSound _sound = NotificationSound.chime;
+  bool _stayConnected = true;
   String _name = '';
   String _email = '';
   String _phone = '';
@@ -47,17 +51,20 @@ class _AccountPageState extends State<AccountPage> {
     final askPassword = await PasswordVault.instance.askEveryOpen();
     final autoConnect = await BrokerService.instance.autoConnectEnabled();
     final sound = await NotificationService.instance.sound();
+    final stayConnected = await BackgroundService.instance.enabled();
     final prefs = await SharedPreferences.getInstance();
     if (!mounted) return;
     setState(() {
       _sound = sound;
+      _stayConnected = stayConnected;
       _askPassword = askPassword;
       _autoConnect = autoConnect;
       _avatar = prefs.getString(IdentityService.avatarPrefKey) ?? '';
       _name = prefs.getString('profile.name') ?? '';
       _email = prefs.getString('profile.email') ?? '';
       _phone = prefs.getString('profile.phone') ?? '';
-      _language = prefs.getString('language') ?? 'English';
+      _language = LocaleController.instance
+          .labelFor(LocaleController.instance.value, systemLabel: 'System');
       _notificationsEnabled = prefs.getBool('notifications') ?? true;
       _biometricsEnabled = prefs.getBool('biometrics') ?? false;
       _locationEnabled = prefs.getBool('location') ?? false;
@@ -110,7 +117,7 @@ class _AccountPageState extends State<AccountPage> {
     final choice = await showDialog<NotificationSound>(
       context: context,
       builder: (context) => SimpleDialog(
-        title: const Text('Notification sound'),
+        title: Text(AppLocalizations.of(context).notificationSound),
         children: [
           for (final sound in NotificationSound.values)
             SimpleDialogOption(
@@ -136,24 +143,32 @@ class _AccountPageState extends State<AccountPage> {
     if (mounted) setState(() => _sound = choice);
   }
 
+  /// Switches the whole app between English, French and the phone's own
+  /// language; the choice is persisted and applied immediately.
   Future<void> _pickLanguage() async {
-    final choice = await showDialog<String>(
+    final systemLabel = AppLocalizations.of(context).languageSystem;
+    final options = <Locale?>[null, ...LocaleController.supported];
+    final choice = await showDialog<Object>(
       context: context,
       builder: (context) => SimpleDialog(
-        title: const Text('Language'),
+        title: Text(AppLocalizations.of(context).language),
         children: [
-          for (final lang in const ['English', 'Français'])
+          for (final locale in options)
             SimpleDialogOption(
-              onPressed: () => Navigator.pop(context, lang),
-              child: Text(lang),
+              onPressed: () => Navigator.pop<Object>(
+                  context, locale ?? const Object()),
+              child: Text(LocaleController.instance
+                  .labelFor(locale, systemLabel: systemLabel)),
             ),
         ],
       ),
     );
-    if (choice != null) {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('language', choice);
-      if (mounted) setState(() => _language = choice);
+    if (choice == null) return;
+    final locale = choice is Locale ? choice : null;
+    await LocaleController.instance.setLocale(locale);
+    if (mounted) {
+      setState(() => _language = LocaleController.instance
+          .labelFor(locale, systemLabel: systemLabel));
     }
   }
 
@@ -210,9 +225,9 @@ class _AccountPageState extends State<AccountPage> {
                 : null,
           ),
           const SizedBox(width: 16),
-          const Expanded(
-            child: Text('Profile picture',
-                style: TextStyle(fontWeight: FontWeight.w500)),
+          Expanded(
+            child: Text(AppLocalizations.of(context).profilePicture,
+                style: const TextStyle(fontWeight: FontWeight.w500)),
           ),
           if (_avatar.isNotEmpty)
             IconButton(
@@ -265,7 +280,8 @@ class _AccountPageState extends State<AccountPage> {
               children: [
                 const Icon(Icons.opacity_rounded),
                 const SizedBox(width: 12),
-                const Expanded(child: Text('Glass opacity')),
+                Expanded(
+                    child: Text(AppLocalizations.of(context).glassOpacity)),
                 Text(GlassController.instance.label,
                     style: const TextStyle(fontSize: 13)),
               ],
@@ -274,12 +290,11 @@ class _AccountPageState extends State<AccountPage> {
               value: solidity,
               onChanged: (value) => GlassController.instance.set(value),
             ),
-            const Padding(
-              padding: EdgeInsets.only(left: 4, bottom: 4),
+            Padding(
+              padding: const EdgeInsets.only(left: 4, bottom: 4),
               child: Text(
-                'How much the panels, bubbles and bars show through. '
-                'Applies everywhere and is remembered.',
-                style: TextStyle(fontSize: 12),
+                AppLocalizations.of(context).glassOpacityHelp,
+                style: const TextStyle(fontSize: 12),
               ),
             ),
           ],
@@ -307,11 +322,12 @@ class _AccountPageState extends State<AccountPage> {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final l10n = AppLocalizations.of(context);
     return GlassBackground(
       child: Scaffold(
         backgroundColor: Colors.transparent,
         appBar: AppBar(
-          title: const Text('Account Settings'),
+          title: Text(l10n.menuSettings),
         ),
         body: SettingsList(
           lightTheme:
@@ -320,12 +336,12 @@ class _AccountPageState extends State<AccountPage> {
               const SettingsThemeData(settingsListBackground: Colors.transparent),
           sections: [
             SettingsSection(
-              title: const Text('Profile'),
+              title: Text(l10n.settingsProfile),
               tiles: <AbstractSettingsTile>[
                 CustomSettingsTile(child: _profilePictureTile()),
                 SettingsTile.navigation(
                   leading: const Icon(Icons.person_rounded),
-                  title: const Text('Display name'),
+                  title: Text(l10n.displayName),
                   value: Text(_name.isEmpty ? 'Not set' : _name),
                   onPressed: (_) => _editField(
                     title: 'Display name',
@@ -361,7 +377,7 @@ class _AccountPageState extends State<AccountPage> {
               ],
             ),
             SettingsSection(
-              title: const Text('Security'),
+              title: Text(l10n.settingsSecurity),
               tiles: <SettingsTile>[
                 SettingsTile.navigation(
                   leading: const Icon(Icons.shield_rounded),
@@ -380,7 +396,7 @@ class _AccountPageState extends State<AccountPage> {
                   },
                   initialValue: _askPassword,
                   leading: const Icon(Icons.password_rounded),
-                  title: const Text('Ask password at every app open'),
+                  title: Text(l10n.askPasswordEveryOpen),
                   description: Text(_askPassword
                       ? 'You unlock the app by hand each time.'
                       : 'Your password is kept in the device keystore so '
@@ -398,7 +414,7 @@ class _AccountPageState extends State<AccountPage> {
               ],
             ),
             SettingsSection(
-              title: const Text('Networks'),
+              title: Text(l10n.networks),
               tiles: <SettingsTile>[
                 SettingsTile.switchTile(
                   onToggle: (value) async {
@@ -408,14 +424,24 @@ class _AccountPageState extends State<AccountPage> {
                   },
                   initialValue: _autoConnect,
                   leading: const Icon(Icons.autorenew_rounded),
-                  title: const Text('Connect automatically'),
+                  title: Text(l10n.connectAutomatically),
                   description: const Text(
-                      'Keeps your networks connected in the background so '
-                      'messages arrive while the app is not in front.'),
+                      'Reconnects your networks as soon as they are '
+                      'reachable.'),
+                ),
+                SettingsTile.switchTile(
+                  onToggle: (value) async {
+                    await BackgroundService.instance.setEnabled(value);
+                    if (mounted) setState(() => _stayConnected = value);
+                  },
+                  initialValue: _stayConnected,
+                  leading: const Icon(Icons.play_circle_outline_rounded),
+                  title: Text(l10n.stayConnected),
+                  description: Text(l10n.stayConnectedHelp),
                 ),
                 SettingsTile.navigation(
                   leading: const Icon(Icons.dns_rounded),
-                  title: const Text('Networks'),
+                  title: Text(l10n.networks),
                   description:
                       const Text('Add, find and edit brokers'),
                   onPressed: (context) => Navigator.push(
@@ -426,7 +452,7 @@ class _AccountPageState extends State<AccountPage> {
               ],
             ),
             SettingsSection(
-              title: const Text('Notifications'),
+              title: Text(l10n.settingsNotifications),
               tiles: <SettingsTile>[
                 SettingsTile.switchTile(
                   onToggle: (value) async {
@@ -441,14 +467,12 @@ class _AccountPageState extends State<AccountPage> {
                   },
                   initialValue: _notificationsEnabled,
                   leading: const Icon(Icons.notifications_rounded),
-                  title: const Text('Message notifications'),
-                  description: const Text(
-                      'Alerts you when a message arrives and the chat is '
-                      'not open.'),
+                  title: Text(l10n.messageNotifications),
+                  description: Text(l10n.messageNotificationsHelp),
                 ),
                 SettingsTile.navigation(
                   leading: const Icon(Icons.music_note_rounded),
-                  title: const Text('Notification sound'),
+                  title: Text(l10n.notificationSound),
                   value: Text(_sound.label),
                   onPressed: (_) => _pickSound(),
                 ),
@@ -474,11 +498,11 @@ class _AccountPageState extends State<AccountPage> {
               ],
             ),
             SettingsSection(
-              title: const Text('Preferences'),
+              title: Text(l10n.settingsPreferences),
               tiles: <AbstractSettingsTile>[
                 SettingsTile.navigation(
                   leading: const Icon(Icons.language_rounded),
-                  title: const Text('Language'),
+                  title: Text(l10n.language),
                   value: Text(_language),
                   onPressed: (_) => _pickLanguage(),
                 ),
@@ -490,11 +514,11 @@ class _AccountPageState extends State<AccountPage> {
                   },
                   initialValue: isDark,
                   leading: const Icon(Icons.dark_mode_rounded),
-                  title: const Text('Dark mode'),
+                  title: Text(l10n.darkMode),
                 ),
                 SettingsTile.navigation(
                   leading: const Icon(Icons.wallpaper_rounded),
-                  title: const Text('Chat wallpaper'),
+                  title: Text(l10n.chatWallpaper),
                   value: ValueListenableBuilder<ChatWallpaper>(
                     valueListenable: BackgroundController.instance,
                     builder: (context, wallpaper, _) =>
@@ -507,7 +531,7 @@ class _AccountPageState extends State<AccountPage> {
                 ),
                 SettingsTile.navigation(
                   leading: const Icon(Icons.image_rounded),
-                  title: const Text('App wallpaper'),
+                  title: Text(l10n.appWallpaper),
                   value: ValueListenableBuilder<ChatWallpaper>(
                     valueListenable: BackgroundController.instance,
                     builder: (context, _, __) => Text(

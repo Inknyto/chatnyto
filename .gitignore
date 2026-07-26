@@ -1,2 +1,7 @@
 backup.tar.gz
 
+
+# Deployment secrets and server identity (never commit these).
+deploy/.env.prod
+deploy/deploy.conf
+deploy/mosquitto/config/passwd

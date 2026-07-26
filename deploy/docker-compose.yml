@@ -1,0 +1,49 @@
+# Production MQTT broker for ChatNyto.
+#
+# Nothing is published to the host: traffic arrives through the Cloudflare
+# tunnel, exactly like the other service on this server. The tunnel maps
+#   wss://<your domain>/mqtt  ->  http://mqtt:9001
+# so the app connects with a wss:// URL and no port has to be opened.
+#
+# Start with:  ./deploy/deploy.sh
+services:
+  mqtt:
+    image: eclipse-mosquitto:2.0
+    restart: unless-stopped
+    volumes:
+      - ./mosquitto/config:/mosquitto/config
+      - mqtt-data:/mosquitto/data
+      - mqtt-log:/mosquitto/log
+    # Deliberately no `ports:` — the broker is only reachable through the
+    # tunnel (and from other containers on this network).
+    healthcheck:
+      test:
+        - CMD
+        - mosquitto_sub
+        - -h
+        - localhost
+        - -p
+        - "1883"
+        - -t
+        - $$SYS/broker/uptime
+        - -C
+        - "1"
+        - -u
+        - ${MQTT_HEALTH_USER}
+        - -P
+        - ${MQTT_HEALTH_PASSWORD}
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
+    depends_on:
+      - mqtt
+
+volumes:
+  mqtt-data:
+  mqtt-log:

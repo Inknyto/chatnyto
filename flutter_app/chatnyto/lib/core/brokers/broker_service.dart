@@ -61,6 +61,68 @@ class Broker {
       );
 }
 
+/// How a broker's host string turns into an mqtt_client connection.
+///
+/// Accepted forms:
+///   192.168.4.1                → plain MQTT on the broker's port
+///   mqtt://host  / mqtts://host → plain / TLS MQTT
+///   ws://host/mqtt / wss://host/mqtt → MQTT over WebSockets, which is what
+///                                works through an HTTPS reverse proxy or a
+///                                Cloudflare-style tunnel
+/// A port in the URL wins over the broker's configured port; otherwise the
+/// scheme's default applies (1883, 8883, 80, 443).
+class _BrokerAddress {
+  _BrokerAddress({
+    required this.server,
+    required this.port,
+    required this.secure,
+    required this.webSocket,
+  });
+
+  final String server;
+  final int port;
+  final bool secure;
+  final bool webSocket;
+
+  static _BrokerAddress parse(Broker broker) {
+    final raw = broker.host.trim();
+    final match = RegExp(r'^([a-zA-Z][a-zA-Z0-9+.-]*)://').firstMatch(raw);
+    if (match == null) {
+      return _BrokerAddress(
+        server: raw,
+        port: broker.port,
+        secure: false,
+        webSocket: false,
+      );
+    }
+    final scheme = match.group(1)!.toLowerCase();
+    final uri = Uri.parse(raw);
+    final isWebSocket = scheme == 'ws' || scheme == 'wss';
+    final isSecure = scheme == 'wss' || scheme == 'mqtts' || scheme == 'ssl';
+    final defaultPort = isWebSocket ? (isSecure ? 443 : 80) : (isSecure ? 8883 : 1883);
+    final port = uri.hasPort
+        ? uri.port
+        : (broker.port != 1883 ? broker.port : defaultPort);
+    if (isWebSocket) {
+      // mqtt_client wants the scheme and path for websockets, but the port
+      // is passed separately.
+      final path = uri.path.isEmpty ? '/mqtt' : uri.path;
+      return _BrokerAddress(
+        server: '$scheme://${uri.host}$path',
+        port: port,
+        secure: isSecure,
+        webSocket: true,
+      );
+    }
+    return _BrokerAddress(
+      server: uri.host.isEmpty ? raw : uri.host,
+      port: port,
+      secure: isSecure,
+      webSocket: false,
+    );
+  }
+}
+
 /// An MQTT broker found by scanning the network the device is on.
 class DiscoveredBroker {
   DiscoveredBroker({required this.host, required this.port});
@@ -191,13 +253,25 @@ class BrokerService extends ChangeNotifier {
   }
 
   /// Connects to [broker]; advertises identity and collects peer presence.
+  ///
+  /// The host may be a plain address (`192.168.4.1`), a TLS one
+  /// (`mqtts://broker.example.com`), or a WebSocket URL
+  /// (`wss://example.com/mqtt`) — which is how a broker behind an HTTPS
+  /// reverse proxy or a tunnel is reached.
   Future<bool> connect(Broker broker) async {
     if (isConnected(broker)) return true;
     final clientId =
         'chatnyto-${DateTime.now().millisecondsSinceEpoch % 1000000}';
-    final client = MqttServerClient.withPort(broker.host, clientId, broker.port)
-      ..keepAlivePeriod = 30
-      ..autoReconnect = true;
+    final address = _BrokerAddress.parse(broker);
+    final client =
+        MqttServerClient.withPort(address.server, clientId, address.port)
+          ..keepAlivePeriod = 30
+          ..autoReconnect = true
+          ..useWebSocket = address.webSocket
+          ..secure = address.secure;
+    if (address.webSocket) {
+      client.websocketProtocols = MqttClientConstants.protocolsSingleDefault;
+    }
     client.onDisconnected = notifyListeners;
     try {
       await client.connect(

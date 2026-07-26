@@ -1,0 +1,10 @@
+# Connection settings for deploy/deploy-remote.sh.
+# Copy to deploy/deploy.conf (gitignored — it names your server) and fill in.
+
+DEPLOY_HOST=203.0.113.10      # VPS IP (or a non-proxied DNS name)
+DEPLOY_PORT=2222              # your custom SSH port
+DEPLOY_USER=deploy            # the hardened non-root user
+DEPLOY_DIR=/opt/chatnyto      # server checkout path (git clone once, see README)
+DEPLOY_BRANCH=main
+GIT_REMOTE=github             # local git remote to push to
+SSH_KEY=~/.ssh/id_ed25519     # key that reaches the server

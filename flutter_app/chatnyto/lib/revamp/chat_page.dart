@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_quill/flutter_quill.dart' as quill;
 
+import '../calls/call_page.dart';
+import '../calls/call_service.dart';
 import '../core/brokers/broker_service.dart';
 import '../core/crypto/crypto_service.dart';
 import '../core/media/image_service.dart';
@@ -11,6 +13,7 @@ import '../core/theme/background_controller.dart';
 import '../core/widgets/connection_status.dart';
 import '../core/widgets/liquid_glass.dart';
 import '../core/widgets/wa_components.dart';
+import '../l10n/app_localizations.dart';
 import 'chat_service.dart';
 
 /// The revamped chat screen: identity of the person in the header, WA-style
@@ -106,9 +109,8 @@ class _RevampChatPageState extends State<RevampChatPage> {
     );
     if (!sent && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Cannot send: unlock your identity first '
-              '(menu → Security & identity).'),
+        SnackBar(
+          content: Text(AppLocalizations.of(context).cannotSendLocked),
         ),
       );
       return;
@@ -123,27 +125,26 @@ class _RevampChatPageState extends State<RevampChatPage> {
     final saved = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Rename group'),
+        title: Text(AppLocalizations.of(context).renameGroup),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             TextField(controller: controller, autofocus: true),
             const SizedBox(height: 8),
-            const Text(
-              'The group name is its address on the network: everyone in '
-              'the group moves to the new one automatically.',
-              style: TextStyle(fontSize: 12),
+            Text(
+              AppLocalizations.of(context).renameGroupHelp,
+              style: const TextStyle(fontSize: 12),
             ),
           ],
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
+            child: Text(AppLocalizations.of(context).cancel),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('Rename'),
+            child: Text(AppLocalizations.of(context).rename),
           ),
         ],
       ),
@@ -157,6 +158,23 @@ class _RevampChatPageState extends State<RevampChatPage> {
     } else {
       setState(() {});
     }
+  }
+
+  /// Rings this contact. Audio travels directly between the two devices, so
+  /// both have to be on the same network.
+  Future<void> _startCall() async {
+    final error = await CallService.instance.call(widget.chat);
+    if (!mounted) return;
+    if (error != null) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(error)));
+      return;
+    }
+    Navigator.push(
+      context,
+      GlassPageRoute(
+          page: CallPage(avatar: widget.chat.peerIdentity?.avatar)),
+    );
   }
 
   /// Attaches a picture: it is shrunk to a link-friendly size and sent in
@@ -174,12 +192,12 @@ class _RevampChatPageState extends State<RevampChatPage> {
           children: [
             ListTile(
               leading: const Icon(Icons.photo_library_rounded),
-              title: const Text('Choose a picture'),
+              title: Text(AppLocalizations.of(context).choosePicture),
               onTap: () => Navigator.pop(sheetContext, false),
             ),
             ListTile(
               leading: const Icon(Icons.photo_camera_rounded),
-              title: const Text('Take a photo'),
+              title: Text(AppLocalizations.of(context).takePhoto),
               onTap: () => Navigator.pop(sheetContext, true),
             ),
           ],
@@ -202,8 +220,8 @@ class _RevampChatPageState extends State<RevampChatPage> {
     if (!mounted) return;
     if (!sent) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-            content: Text('Cannot send: unlock your identity first.')),
+        SnackBar(
+            content: Text(AppLocalizations.of(context).cannotSendLocked)),
       );
       return;
     }
@@ -220,7 +238,7 @@ class _RevampChatPageState extends State<RevampChatPage> {
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setSheetState) => AlertDialog(
-          title: const Text('Group admins'),
+          title: Text(AppLocalizations.of(context).groupAdmins),
           content: SizedBox(
             width: double.maxFinite,
             child: peers.isEmpty
@@ -230,10 +248,9 @@ class _RevampChatPageState extends State<RevampChatPage> {
                 : Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Text(
-                        'Admins can rename this group and delete it for '
-                        'everyone. Only you can change this list.',
-                        style: TextStyle(fontSize: 12),
+                      Text(
+                        AppLocalizations.of(context).groupAdminsHelp,
+                        style: const TextStyle(fontSize: 12),
                       ),
                       const SizedBox(height: 8),
                       Flexible(
@@ -398,6 +415,7 @@ class _RevampChatPageState extends State<RevampChatPage> {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final l10n = AppLocalizations.of(context);
     final peer = widget.chat.peerIdentity;
     return GlassBackground(
       child: Scaffold(
@@ -467,6 +485,12 @@ class _RevampChatPageState extends State<RevampChatPage> {
             ),
           ),
           actions: [
+            if (widget.chat.isDm)
+              IconButton(
+                tooltip: l10n.call,
+                icon: const Icon(Icons.call_rounded),
+                onPressed: _startCall,
+              ),
             PopupMenuButton<String>(
               onSelected: (choice) async {
                 switch (choice) {
@@ -493,25 +517,25 @@ class _RevampChatPageState extends State<RevampChatPage> {
                 }
               },
               itemBuilder: (context) => [
-                const PopupMenuItem(
-                    value: 'identity', child: Text('View identity')),
-                const PopupMenuItem(
+                PopupMenuItem(
+                    value: 'identity', child: Text(l10n.viewIdentity)),
+                PopupMenuItem(
                     value: 'wallpaper',
-                    child: Text('Wallpaper for this chat')),
+                    child: Text(l10n.wallpaperForChat)),
                 if (BackgroundController.instance
                     .hasOverride(widget.chat.id))
-                  const PopupMenuItem(
+                  PopupMenuItem(
                       value: 'wallpaper_reset',
-                      child: Text('Use global wallpaper')),
+                      child: Text(l10n.useGlobalWallpaper)),
                 if (_isOwner)
-                  const PopupMenuItem(
-                      value: 'admins', child: Text('Group admins')),
+                  PopupMenuItem(
+                      value: 'admins', child: Text(l10n.groupAdmins)),
                 if (_canAdminister) ...[
-                  const PopupMenuItem(
-                      value: 'rename', child: Text('Rename group')),
-                  const PopupMenuItem(
+                  PopupMenuItem(
+                      value: 'rename', child: Text(l10n.renameGroup)),
+                  PopupMenuItem(
                       value: 'delete',
-                      child: Text('Delete group for everyone')),
+                      child: Text(l10n.deleteGroupForEveryone)),
                 ],
               ],
             ),
@@ -586,7 +610,7 @@ class _RevampChatPageState extends State<RevampChatPage> {
                 onSend: _send,
                 leading: [
                   IconButton(
-                    tooltip: 'Formatting',
+                    tooltip: l10n.formatting,
                     icon: Icon(_showToolbar
                         ? Icons.keyboard_arrow_down_rounded
                         : Icons.text_format_rounded),
@@ -594,7 +618,7 @@ class _RevampChatPageState extends State<RevampChatPage> {
                         setState(() => _showToolbar = !_showToolbar),
                   ),
                   IconButton(
-                    tooltip: 'Send a picture',
+                    tooltip: l10n.sendPicture,
                     icon: _sendingImage
                         ? const SizedBox(
                             width: 18,
@@ -612,8 +636,8 @@ class _RevampChatPageState extends State<RevampChatPage> {
                     controller: _editorController,
                     scrollController: _editorScrollController,
                     focusNode: _editorFocus,
-                    config: const quill.QuillEditorConfig(
-                      placeholder: 'Message',
+                    config: quill.QuillEditorConfig(
+                      placeholder: l10n.messageHint,
                       expands: false,
                       padding: EdgeInsets.zero,
                     ),

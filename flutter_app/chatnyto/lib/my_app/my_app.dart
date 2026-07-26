@@ -1,13 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_quill/flutter_quill.dart';
 
+import '../calls/call_page.dart';
+import '../calls/call_service.dart';
 import '../core/brokers/broker_service.dart';
 import '../core/crypto/crypto_service.dart';
 import '../core/crypto/password_vault.dart';
 import '../core/notifications/notification_service.dart';
 import '../core/theme/app_theme.dart';
 import '../core/theme/glass_controller.dart';
+import '../core/theme/locale_controller.dart';
 import '../core/theme/theme_controller.dart';
+import '../l10n/app_localizations.dart';
 import '../core/widgets/liquid_glass.dart';
 import '../revamp/chat_service.dart';
 import '../revamp/home_shell.dart';
@@ -22,18 +26,40 @@ class MyApp extends StatefulWidget {
 }
 
 class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
+  /// Needed to put the call screen in front from anywhere in the app.
+  static final GlobalKey<NavigatorState> _navigatorKey =
+      GlobalKey<NavigatorState>();
+  bool _callScreenOpen = false;
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    CallService.instance.init();
+    CallService.instance.addListener(_onCallChanged);
     ThemeController.instance.load();
     GlassController.instance.load();
+    LocaleController.instance.load();
   }
 
   @override
   void dispose() {
+    CallService.instance.removeListener(_onCallChanged);
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
+  }
+
+  /// An incoming call has to interrupt whatever is on screen, so the call
+  /// page is pushed from here rather than from any one screen.
+  void _onCallChanged() {
+    final calls = CallService.instance;
+    final navigator = _navigatorKey.currentState;
+    if (navigator == null) return;
+    if (calls.state == CallState.ringing && !_callScreenOpen) {
+      _callScreenOpen = true;
+      navigator
+          .push(GlassPageRoute(page: const CallPage()))
+          .whenComplete(() => _callScreenOpen = false);
+    }
   }
 
   /// The broker connections and their heartbeat are deliberately left
@@ -58,16 +84,26 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     return ValueListenableBuilder<ThemeMode>(
       valueListenable: ThemeController.instance,
       builder: (context, mode, _) {
-        return MaterialApp(
-          title: 'ChatNyto',
-          debugShowCheckedModeBanner: false,
-          theme: AppTheme.light,
-          darkTheme: AppTheme.dark,
-          themeMode: mode,
-          // Required by the quill editor/toolbar widgets; without it they
-          // throw and blank the whole page.
-          localizationsDelegates: FlutterQuillLocalizations.localizationsDelegates,
-          home: const _Entry(),
+        return ValueListenableBuilder<Locale?>(
+          valueListenable: LocaleController.instance,
+          builder: (context, locale, _) => MaterialApp(
+            title: 'ChatNyto',
+            debugShowCheckedModeBanner: false,
+            theme: AppTheme.light,
+            darkTheme: AppTheme.dark,
+            themeMode: mode,
+            // null follows the phone's language.
+            locale: locale,
+            navigatorKey: _navigatorKey,
+            supportedLocales: LocaleController.supported,
+            localizationsDelegates: const [
+              ...AppLocalizations.localizationsDelegates,
+              // Required by the quill editor/toolbar widgets; without it
+              // they throw and blank the whole page.
+              ...FlutterQuillLocalizations.localizationsDelegates,
+            ],
+            home: const _Entry(),
+          ),
         );
       },
     );
