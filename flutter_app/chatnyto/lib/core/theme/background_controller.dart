@@ -28,15 +28,21 @@ class BackgroundController extends ValueNotifier<ChatWallpaper> {
   static final BackgroundController instance = BackgroundController._();
 
   static const _prefKey = 'chat.wallpaper';
+  static const _appPrefKey = 'app.wallpaper';
   static const _chatPrefPrefix = 'chat.wallpaper.of.';
   bool _loaded = false;
   final Map<String, String> _perChat = {};
+  ChatWallpaper _app = ChatWallpaper.none;
+
+  /// Wallpaper painted under the whole app (all glass surfaces).
+  ChatWallpaper get appWallpaper => _app;
 
   Future<void> load() async {
     if (_loaded) return;
     _loaded = true;
     final prefs = await SharedPreferences.getInstance();
     final stored = prefs.getString(_prefKey);
+    _app = _byAsset(prefs.getString(_appPrefKey));
     for (final key in prefs.getKeys()) {
       if (key.startsWith(_chatPrefPrefix)) {
         _perChat[key.substring(_chatPrefPrefix.length)] =
@@ -44,6 +50,18 @@ class BackgroundController extends ValueNotifier<ChatWallpaper> {
       }
     }
     value = _byAsset(stored);
+    notifyListeners();
+  }
+
+  Future<void> selectAppWallpaper(ChatWallpaper wallpaper) async {
+    _app = wallpaper;
+    final prefs = await SharedPreferences.getInstance();
+    if (wallpaper.asset == null) {
+      await prefs.remove(_appPrefKey);
+    } else {
+      await prefs.setString(_appPrefKey, wallpaper.asset!);
+    }
+    notifyListeners();
   }
 
   static ChatWallpaper _byAsset(String? asset) => ChatWallpaper.all.firstWhere(

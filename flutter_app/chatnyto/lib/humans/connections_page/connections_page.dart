@@ -123,6 +123,99 @@ class _ConnectionsPageState extends State<ConnectionsPage> {
     );
   }
 
+  /// Long-press edit mode: edit the connection in place or delete it.
+  void _showConnectionOptions(Map<String, String> connection) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) => LiquidGlass(
+        margin: const EdgeInsets.all(12),
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.edit_rounded),
+              title: const Text('Edit'),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                _editConnection(connection);
+              },
+            ),
+            ListTile(
+              leading:
+                  const Icon(Icons.delete_rounded, color: Colors.redAccent),
+              title: const Text('Delete'),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                setState(() {
+                  _connections.remove(connection);
+                  _saveConnections();
+                });
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _editConnection(Map<String, String> connection) {
+    final brokerController =
+        TextEditingController(text: connection['brokerIP']);
+    final topicController =
+        TextEditingController(text: connection['topicName']);
+    final secretController =
+        TextEditingController(text: connection['secret'] ?? '');
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Edit Connection'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: brokerController,
+              decoration:
+                  const InputDecoration(labelText: 'Broker IP / hostname'),
+            ),
+            TextField(
+              controller: topicController,
+              decoration: const InputDecoration(labelText: 'Topic Name'),
+            ),
+            TextField(
+              controller: secretController,
+              obscureText: true,
+              decoration: const InputDecoration(
+                  labelText: 'Channel passphrase (optional)'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              if (brokerController.text.isNotEmpty &&
+                  topicController.text.isNotEmpty) {
+                setState(() {
+                  connection['brokerIP'] = brokerController.text.trim();
+                  connection['topicName'] = topicController.text.trim();
+                  connection['secret'] = secretController.text;
+                });
+                _saveConnections();
+                Navigator.pop(context);
+              }
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _navigateToChat(Map<String, String> connection) {
     Navigator.push(
       context,
@@ -179,10 +272,7 @@ class _ConnectionsPageState extends State<ConnectionsPage> {
                     subtitle:
                         '${private ? "🔒 " : ""}on ${connection['brokerIP']}',
                     onTap: () => _navigateToChat(connection),
-                    onLongPress: () => setState(() {
-                      _connections.remove(connection);
-                      _saveConnections();
-                    }),
+                    onLongPress: () => _showConnectionOptions(connection),
                   );
                 },
               ),

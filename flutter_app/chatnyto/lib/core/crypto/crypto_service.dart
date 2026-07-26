@@ -150,6 +150,7 @@ class IdentityService {
   SimpleKeyPair? _x25519KeyPair;
   SimpleKeyPair? _ed25519KeyPair;
   String? _displayName;
+  SecretKey? _storageKey;
 
   bool get isUnlocked => _x25519KeyPair != null;
   String? get displayName => _displayName;
@@ -251,6 +252,21 @@ class IdentityService {
   void lock() {
     _x25519KeyPair = null;
     _ed25519KeyPair = null;
+    _storageKey = null;
+  }
+
+  /// Symmetric key for encrypting data at rest (message history, outbox),
+  /// derived from the identity seed — only available while unlocked.
+  Future<SecretKey?> storageKey() async {
+    if (_x25519KeyPair == null) return null;
+    if (_storageKey != null) return _storageKey;
+    final seed = await _x25519KeyPair!.extractPrivateKeyBytes();
+    final hkdf = Hkdf(hmac: Hmac.sha256(), outputLength: 32);
+    _storageKey = await hkdf.deriveKey(
+      secretKey: SecretKey(seed),
+      info: utf8.encode('chatnyto:storage'),
+    );
+    return _storageKey;
   }
 
   Future<void> delete() async {

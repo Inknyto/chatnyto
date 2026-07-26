@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
@@ -7,25 +8,52 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../crypto/crypto_service.dart';
 
-/// A named MQTT broker the user has registered.
+/// A named MQTT broker the user has registered. Username/password are
+/// optional, for brokers that require authentication.
 class Broker {
-  Broker({required this.name, required this.host, this.port = 1883});
+  Broker({
+    required this.name,
+    required this.host,
+    this.port = 1883,
+    this.username = '',
+    this.password = '',
+  });
 
   final String name;
   final String host;
   final int port;
+  final String username;
+  final String password;
 
-  Map<String, dynamic> toJson() => {'name': name, 'host': host, 'port': port};
+  Map<String, dynamic> toJson() => {
+        'name': name,
+        'host': host,
+        'port': port,
+        if (username.isNotEmpty) 'user': username,
+        if (password.isNotEmpty) 'pass': password,
+      };
 
   static Broker fromJson(Map<String, dynamic> json) => Broker(
         name: json['name'] as String,
         host: json['host'] as String,
         port: (json['port'] as num?)?.toInt() ?? 1883,
+        username: json['user'] as String? ?? '',
+        password: json['pass'] as String? ?? '',
       );
 }
 
 const presenceTopicPrefix = 'chatnyto/presence';
 const chatTopicPrefix = 'chatnyto/chat';
+const groupsTopicPrefix = 'chatnyto/groups';
+
+/// A public group advertised on the mesh.
+class PublicGroupAd {
+  PublicGroupAd({required this.slug, required this.name, required this.seenAt});
+
+  final String slug;
+  final String name;
+  final DateTime seenAt;
+}
 
 /// Keeps the user's broker list (add by name / remove), manages one MQTT
 /// connection per broker, and advertises the user's public identity on the
@@ -40,11 +68,23 @@ class BrokerService extends ChangeNotifier {
   final List<Broker> _brokers = [];
   final Map<String, MqttServerClient> _clients = {};
   final Map<String, PublicIdentity> _peers = {};
+  final Map<String, PublicGroupAd> _publicGroups = {};
   bool _loaded = false;
+  Timer? _heartbeat;
 
   /// Invoked for every message arriving on `chatnyto/chat/#` of any
   /// connected broker. Set by the chat messenger.
   void Function(String topic, String payload)? onChatMessage;
+
+  /// Invoked on every heartbeat tick so other services (chat sync, group
+  /// announcements) can piggyback on the same cadence.
+  Future<void> Function()? onHeartbeat;
+
+  List<PublicGroupAd> get publicGroups {
+    final list = _publicGroups.values.toList()
+      ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+    return list;
+  }
 
   List<Broker> get brokers => List.unmodifiable(_brokers);
   List<PublicIdentity> get peers => List.unmodifiable(_peers.values);
@@ -97,15 +137,24 @@ class BrokerService extends ChangeNotifier {
       ..autoReconnect = true;
     client.onDisconnected = notifyListeners;
     try {
-      await client.connect();
+      await client.connect(
+        broker.username.isEmpty ? null : broker.username,
+        broker.password.isEmpty ? null : broker.password,
+      );
     } catch (_) {
+      client.disconnect();
+      return false;
+    }
+    if (client.connectionStatus?.state != MqttConnectionState.connected) {
+      // e.g. bad credentials on an authenticated broker
       client.disconnect();
       return false;
     }
     _clients[broker.name] = client;
 
-    client.subscribe('$presenceTopicPrefix/#', MqttQos.atLeastOnce);
-    client.subscribe('$chatTopicPrefix/#', MqttQos.atLeastOnce);
+    // Attach the listener BEFORE subscribing: retained messages are
+    // delivered right after SUBACK and would be lost otherwise (this made
+    // every user see only themselves in the People tab).
     client.updates!.listen((events) async {
       for (final event in events) {
         final payload = event.payload;
@@ -116,6 +165,22 @@ class BrokerService extends ChangeNotifier {
                 event.topic, utf8.decode(payload.payload.message));
           } catch (_) {
             // Ignore undecodable chat payloads.
+          }
+          continue;
+        }
+        if (event.topic.startsWith(groupsTopicPrefix)) {
+          try {
+            final json = jsonDecode(utf8.decode(payload.payload.message))
+                as Map<String, dynamic>;
+            final slug = json['slug'] as String?;
+            final name = json['name'] as String?;
+            if (slug != null && name != null) {
+              _publicGroups[slug] = PublicGroupAd(
+                  slug: slug, name: name, seenAt: DateTime.now());
+              notifyListeners();
+            }
+          } catch (_) {
+            // Ignore malformed group announcements.
           }
           continue;
         }
@@ -133,6 +198,9 @@ class BrokerService extends ChangeNotifier {
         }
       }
     });
+    client.subscribe('$presenceTopicPrefix/#', MqttQos.atLeastOnce);
+    client.subscribe('$chatTopicPrefix/#', MqttQos.atLeastOnce);
+    client.subscribe('$groupsTopicPrefix/#', MqttQos.atLeastOnce);
 
     await advertiseIdentity(broker);
     notifyListeners();
@@ -202,5 +270,21 @@ class BrokerService extends ChangeNotifier {
         await connect(broker);
       }
     }
+  }
+
+  /// Periodic heartbeat: re-advertises presence (brokers without retained-
+  /// message support otherwise show late joiners an empty People tab),
+  /// retries broker connections, and lets other services piggyback.
+  void startHeartbeat({Duration every = const Duration(seconds: 30)}) {
+    _heartbeat ??= Timer.periodic(every, (_) async {
+      await autoConnectAll();
+      await advertiseEverywhere();
+      await onHeartbeat?.call();
+    });
+  }
+
+  void stopHeartbeat() {
+    _heartbeat?.cancel();
+    _heartbeat = null;
   }
 }
