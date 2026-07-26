@@ -25,13 +25,17 @@ class WelcomeScreen extends StatelessWidget {
           child: Column(
             children: [
               const Spacer(),
-              LiquidGlass(
-                radius: 120,
-                padding: const EdgeInsets.all(48),
-                child: Icon(
-                  Icons.forum_rounded,
-                  size: 120,
-                  color: scheme.primary,
+              ClipRRect(
+                borderRadius: BorderRadius.circular(46),
+                child: Image.asset(
+                  'assets/logo.png',
+                  width: 168,
+                  height: 168,
+                  errorBuilder: (context, _, __) => Icon(
+                    Icons.forum_rounded,
+                    size: 120,
+                    color: scheme.primary,
+                  ),
                 ),
               ),
               const SizedBox(height: 40),

@@ -215,13 +215,25 @@ Done:     dot in the home app bar and a dot plus wording under the name in the c
 Done:     updating with the brokers.
 The old app files are in the comunities tab.
 Add full english/french support for the entire app via i18n
-Show the networks in a network graph, in addition of the existing view.
-Add broker connection via a scannable QR code.
-Get a nice logo for the app, that symbolizes what it does. The app connects humans, robots
-and AIs to mage great things. 
+Done: [x] DONE - Network map: Networks -> the hub icon opens a graph
+Done:     (lib/core/brokers/network_graph_page.dart) drawing this device at the centre, every
+Done:     registered network around it (green when connected, amber when unreachable, with a
+Done:     dot travelling along live links) and the people discovered on each one hanging off
+Done:     their broker. The list view stays as it was.
+Done: [x] DONE - QR codes for networks: long-pressing a network offers "Share by QR code",
+Done:     which shows a chatnyto://broker?... code carrying host, port and any credentials; the
+Done:     scan button in the Networks app bar opens the camera, adds the scanned network and
+Done:     connects to it (lib/core/brokers/broker_qr.dart, qr_flutter + mobile_scanner, camera
+Done:     permission added). The scanner bundles its barcode model so it works with no
+Done:     internet, like the rest of the app.
+Done: [x] DONE - Logo: assets/logo.png (plus a maskable foreground and every Android
+Done:     launcher density) shows a person, an AI spark and a robot linked in a triangle around
+Done:     a chat bubble whose three dots carry their colours - the app connecting humans, robots
+Done:     and AIs. It is the launcher icon and greets you on the welcome screen.
 You have to develop the AI part of the app.
 Add mcp support and tools(skills). Research all current available AI APIs and add main AI
 providers as AI providers via BYOK (Bring Your Own Key).
 Think UI/UX first in any changes you make.
 If you have questions, do not write the code yet. Ask them first. If you do not have
 questions, write the complete code.
+Add phone calls as per @whatsapp_clone/
