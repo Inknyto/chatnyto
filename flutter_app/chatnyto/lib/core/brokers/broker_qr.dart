@@ -3,6 +3,7 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
 import '../widgets/liquid_glass.dart';
+import 'broker_credentials.dart';
 import 'broker_service.dart';
 
 /// Sharing a network by sight: the owner shows a QR code, the other person
@@ -50,13 +51,58 @@ class BrokerQr {
 }
 
 /// Shows a broker's QR code, big enough to be scanned off the screen.
-class BrokerQrPage extends StatelessWidget {
+///
+/// The code carries the address alone by default. A network's sign-in is
+/// not the sort of thing to put on a screen someone may be pointing a camera
+/// at from across the room, so including it is a deliberate choice, and the
+/// password is only read out of the keystore once that choice is made.
+class BrokerQrPage extends StatefulWidget {
   const BrokerQrPage({super.key, required this.broker});
 
   final Broker broker;
 
   @override
+  State<BrokerQrPage> createState() => _BrokerQrPageState();
+}
+
+class _BrokerQrPageState extends State<BrokerQrPage> {
+  bool _includeSignIn = false;
+  bool _hasSignIn = false;
+  Broker? _withSignIn;
+
+  @override
+  void initState() {
+    super.initState();
+    BrokerCredentials.instance.has(widget.broker.name).then((has) {
+      if (mounted) setState(() => _hasSignIn = has);
+    });
+  }
+
+  Future<void> _toggleSignIn(bool value) async {
+    if (!value) {
+      setState(() {
+        _includeSignIn = false;
+        _withSignIn = null;
+      });
+      return;
+    }
+    final stored = await BrokerCredentials.instance.read(widget.broker.name);
+    if (!mounted) return;
+    setState(() {
+      _includeSignIn = true;
+      _withSignIn = Broker(
+        name: widget.broker.name,
+        host: widget.broker.host,
+        port: widget.broker.port,
+        username: stored.username,
+        password: stored.password,
+      );
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final broker = _includeSignIn ? (_withSignIn ?? widget.broker) : widget.broker;
     final payload = BrokerQr.encode(broker);
     return GlassBackground(
       child: Scaffold(
@@ -91,11 +137,23 @@ class BrokerQrPage extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 16),
+                  if (_hasSignIn)
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      value: _includeSignIn,
+                      onChanged: _toggleSignIn,
+                      title: const Text('Include the sign-in',
+                          style: TextStyle(fontSize: 14)),
+                      subtitle: const Text(
+                        'Off, the code shares the address only.',
+                        style: TextStyle(fontSize: 11),
+                      ),
+                    ),
                   Text(
-                    broker.password.isEmpty
-                        ? 'Anyone who scans this joins the same network.'
-                        : 'This code carries the password too — only show it '
-                            'to people you want on the network.',
+                    _includeSignIn
+                        ? 'This code carries the password — only show it to '
+                            'people you want on the network.'
+                        : 'Anyone who scans this reaches the same network.',
                     textAlign: TextAlign.center,
                     style: const TextStyle(fontSize: 12),
                   ),

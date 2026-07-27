@@ -5,3 +5,6 @@ backup.tar.gz
 deploy/.env.prod
 deploy/deploy.conf
 deploy/mosquitto/config/passwd
+
+# Generated on deploy; contains the broker account handed to the app.
+deploy/wellknown/

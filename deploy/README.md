@@ -10,7 +10,16 @@ encrypted traffic, and can read none of it.
 | Piece | What it does |
 | --- | --- |
 | `mosquitto` | The MQTT broker. Authenticated users only, restricted to the `chatnyto/#` topic tree. |
+| `profile` | Serves `/.well-known/chatnyto.json`, so the app needs nothing but the domain. |
 | `cloudflared` | Publishes the broker as `wss://<your domain>/mqtt` through a Cloudflare tunnel, so no port is opened on the server. |
+
+## What the user types
+
+Just the address: `supa-tech.com`. The app fetches
+`https://supa-tech.com/.well-known/chatnyto.json` over HTTPS, and from it
+learns the WebSocket URL and the account to use. The credential goes straight
+into the device keystore — it is never shown in the interface, never typed,
+and never written to the app's own storage.
 
 A plain MQTT port cannot travel through an HTTP tunnel, which is why the
 broker also listens for MQTT over WebSockets — the app speaks both, and picks
@@ -25,9 +34,16 @@ the right one from the URL scheme.
    ```
    Docker and the Compose plugin must be installed.
 
-2. **In Cloudflare Zero Trust**, create a tunnel and add a public hostname
-   route for your domain with path `/mqtt` pointing at `http://mqtt:9001`.
-   Copy the tunnel token.
+2. **In Cloudflare Zero Trust**, create a tunnel and add two public hostname
+   routes for your domain:
+
+   | Path | Service |
+   | --- | --- |
+   | `/mqtt` | `http://mqtt:9001` |
+   | `/.well-known/*` | `http://profile:80` |
+
+   Copy the tunnel token. The second route is what lets the app configure
+   itself from the domain alone.
 
 3. **On your machine**, fill in the two config files:
    ```bash

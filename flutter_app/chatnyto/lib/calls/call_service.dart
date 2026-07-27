@@ -5,7 +5,9 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../core/brokers/broker_service.dart';
 import '../core/crypto/crypto_service.dart';
+import '../core/notifications/notification_service.dart';
 import '../revamp/chat_service.dart';
 
 /// Where a call is in its life.
@@ -97,6 +99,10 @@ class CallService extends ChangeNotifier {
 
   RTCPeerConnection? _peer;
   MediaStream? _localStream;
+  String _iceState = '';
+
+  /// Where the media path has got to, for the call screen's status line.
+  String get iceState => _iceState;
   final List<RTCIceCandidate> _pendingCandidates = [];
   bool _remoteDescriptionSet = false;
 
@@ -126,6 +132,9 @@ class CallService extends ChangeNotifier {
     _history.addAll((prefs.getStringList(_historyKey) ?? []).map(
         (s) => CallRecord.fromJson(jsonDecode(s) as Map<String, dynamic>)));
     ChatService.instance.onCallSignal = _onSignal;
+    // Answering from the ringing notification, without opening the app.
+    NotificationService.instance.onCallAction =
+        (answered) => answered ? answer() : decline();
     notifyListeners();
   }
 
@@ -152,6 +161,11 @@ class CallService extends ChangeNotifier {
     if (inCall) return 'A call is already in progress.';
     final peer = chat.peerIdentity;
     if (peer == null) return 'This contact has no verified key yet.';
+    // Ringing goes through the broker, so without one there is nothing to
+    // ring — better to say so than to sit on "Calling…" until it times out.
+    if (!BrokerService.instance.anyConnected) {
+      return 'Not connected to a network, so nobody can be rung.';
+    }
 
     _chat = chat;
     _peerName = chat.title;
@@ -166,7 +180,7 @@ class CallService extends ChangeNotifier {
         'offerToReceiveVideo': false,
       });
       await _peer!.setLocalDescription(offer);
-      await _send({'call': 'offer', 'sdp': offer.sdp, 'type': offer.type});
+      await _send({'call': 'offer', 'sdp': offer.sdp});
     } catch (error) {
       await _finish(answered: false, reason: 'Could not start the call: $error');
       return 'Could not start the call: $error';
@@ -183,6 +197,7 @@ class CallService extends ChangeNotifier {
   // ------------------------------------------------------------- incoming
 
   Future<void> answer() async {
+    await NotificationService.instance.cancelIncomingCall();
     if (_state != CallState.ringing || _peer == null) return;
     _ringTimer?.cancel();
     _setState(CallState.connecting);
@@ -192,7 +207,7 @@ class CallService extends ChangeNotifier {
         'offerToReceiveVideo': false,
       });
       await _peer!.setLocalDescription(answer);
-      await _send({'call': 'answer', 'sdp': answer.sdp, 'type': answer.type});
+      await _send({'call': 'answer', 'sdp': answer.sdp});
     } catch (error) {
       await _finish(answered: false, reason: 'Could not answer: $error');
     }
@@ -237,6 +252,7 @@ class CallService extends ChangeNotifier {
   /// Handles a signalling message that arrived inside the encrypted DM.
   Future<void> _onSignal(ChatEntry chat, Map<String, dynamic> data) async {
     final kind = data['call'] as String?;
+    debugPrint('[call] signal in: $kind from ${chat.title}');
     if (kind == null) return;
 
     switch (kind) {
@@ -261,6 +277,9 @@ class CallService extends ChangeNotifier {
           return;
         }
         _setState(CallState.ringing);
+        // The screen alone is not enough: the app may be in the background,
+        // or the phone locked in a pocket.
+        await NotificationService.instance.showIncomingCall(_peerName);
         _ringTimer = Timer(_ringTimeout, () {
           if (_state == CallState.ringing) {
             _finish(answered: false, reason: 'Missed');
@@ -311,8 +330,10 @@ class CallService extends ChangeNotifier {
     await _sendTo(chat, data);
   }
 
-  Future<void> _sendTo(ChatEntry chat, Map<String, dynamic> data) =>
-      ChatService.instance.sendCallSignal(chat, data);
+  Future<void> _sendTo(ChatEntry chat, Map<String, dynamic> data) {
+    debugPrint('[call] signal out: ${data['call']} on ${chat.topic}');
+    return ChatService.instance.sendCallSignal(chat, data);
+  }
 
   // ------------------------------------------------------------ webrtc
 
@@ -334,7 +355,22 @@ class CallService extends ChangeNotifier {
       await _peer!.addTrack(track, _localStream!);
     }
 
+    // Surfaced on the call screen and in the logs: when a call fails it is
+    // almost always the network path, and "Connecting…" forever tells the
+    // user nothing.
+    _peer!.onIceConnectionState = (state) {
+      debugPrint('[call] ice $state');
+      _iceState = state.name.replaceFirst('RTCIceConnectionState', '');
+      notifyListeners();
+    };
+
     _peer!.onIceCandidate = (candidate) {
+      // Loopback addresses can never reach the other device, but ICE still
+      // pairs and times out on them, which measurably delays the moment the
+      // call goes live. Don't send what cannot work.
+      final line = candidate.candidate ?? '';
+      if (line.contains(' 127.0.0.1 ') || line.contains(' ::1 ')) return;
+      debugPrint('[call] local candidate $line');
       _send({
         'call': 'ice',
         'candidate': candidate.candidate,
@@ -371,6 +407,7 @@ class CallService extends ChangeNotifier {
   }
 
   Future<void> _finish({required bool answered, String? reason}) async {
+    await NotificationService.instance.cancelIncomingCall();
     _ringTimer?.cancel();
     _tick?.cancel();
     _ringTimer = null;

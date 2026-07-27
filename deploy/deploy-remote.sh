@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# ~/Documents/git/chatnyto/deploy/deploy-remote.sh 27 Jul 2026 at 12:12:26 PM
 # One command to deploy the ChatNyto MQTT broker to the VPS.
 #
 #   ./deploy/deploy-remote.sh              # push HEAD and deploy
@@ -25,7 +26,7 @@ CONF="deploy/deploy.conf"
 : "${DEPLOY_HOST:?Set DEPLOY_HOST in deploy/deploy.conf (server IP or hostname)}"
 : "${DEPLOY_PORT:=22}"
 : "${DEPLOY_USER:?Set DEPLOY_USER in deploy/deploy.conf (non-root SSH user)}"
-: "${DEPLOY_DIR:=/opt/chatnyto}"
+: "${DEPLOY_DIR:=/home/nyto/chatnyto}"
 : "${DEPLOY_BRANCH:=main}"
 : "${GIT_REMOTE:=origin}"
 : "${SSH_KEY:=$HOME/.ssh/id_ed25519_hetzner}"
@@ -36,14 +37,12 @@ if [ ! -f "$ENV_FILE" ]; then
   exit 1
 fi
 
-# Compose env files are not shell-evaluated, so resolve $(pass …) and $VAR
-# here and re-emit plain KEY=value lines. Values must be single-line.
 render_env() {
   bash -c '
     set -euo pipefail
     set -a; . "$1"; set +a
     sed -n "s/^\([A-Za-z_][A-Za-z0-9_]*\)=.*/\1/p" "$1" | awk "!seen[\$0]++" \
-      | while IFS= read -r key; do printf "%s=%s\n" "$key" "${!key-}"; done
+      | while IFS= read -r key; do printf "%s='\''%s'\''\n" "$key" "${!key-}"; done
   ' render "$ENV_FILE"
 }
 
@@ -87,10 +86,11 @@ echo "==> Updating the checkout on $DEPLOY_HOST"
 echo "==> Streaming secrets to tmpfs (never written to the server's disk)"
 printf '%s\n' "$RENDERED_ENV" | "${SSH[@]}" "umask 177 && cat > '$SECRETS_REMOTE'"
 
+# AFTER
 echo "==> Deploying on the server (target: $TARGET)"
-"${SSH[@]}" "cd '$DEPLOY_DIR' && status=0; \
-  ENV_FILE='$SECRETS_REMOTE' ./deploy/deploy.sh '$TARGET' || status=\$?; \
-  rm -f '$SECRETS_REMOTE'; exit \$status"
+"${SSH[@]}" "cd '$DEPLOY_DIR' && DEPLOY_STATUS=0; \
+  ENV_FILE='$SECRETS_REMOTE' ./deploy/deploy.sh '$TARGET' || DEPLOY_STATUS=\$?; \
+  rm -f '$SECRETS_REMOTE'; exit \$DEPLOY_STATUS"
 
 echo "==> Deployed."
 echo "    In the app: Networks -> + -> Host: wss://<your domain>/mqtt"

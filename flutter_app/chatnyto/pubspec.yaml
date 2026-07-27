@@ -53,6 +53,9 @@ dependencies:
   mobile_scanner: ^7.0.0
   flutter_foreground_task: ^9.1.0
   flutter_webrtc: ^1.5.2
+  gal: ^2.3.3
+  share_plus: ^13.3.0
+  path_provider: ^2.1.6
 
 # flutter_secure_storage 10.3.1 pins its Windows implementation to a build
 # that requires win32 5.x, which in turn drags quill_native_bridge_windows

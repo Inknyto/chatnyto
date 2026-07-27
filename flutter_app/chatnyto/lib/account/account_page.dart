@@ -16,7 +16,9 @@ import '../core/theme/locale_controller.dart';
 import '../core/theme/theme_controller.dart';
 import '../core/widgets/liquid_glass.dart';
 import '../l10n/app_localizations.dart';
+import 'accounts_page.dart';
 import 'security_page.dart';
+import 'share_pages.dart';
 
 class AccountPage extends StatefulWidget {
   const AccountPage({super.key});
@@ -59,7 +61,7 @@ class _AccountPageState extends State<AccountPage> {
       _stayConnected = stayConnected;
       _askPassword = askPassword;
       _autoConnect = autoConnect;
-      _avatar = prefs.getString(IdentityService.avatarPrefKey) ?? '';
+      _avatar = prefs.getString(IdentityService.instance.avatarKey) ?? '';
       _name = prefs.getString('profile.name') ?? '';
       _email = prefs.getString('profile.email') ?? '';
       _phone = prefs.getString('profile.phone') ?? '';
@@ -257,9 +259,9 @@ class _AccountPageState extends State<AccountPage> {
   Future<void> _setAvatar(String value) async {
     final prefs = await SharedPreferences.getInstance();
     if (value.isEmpty) {
-      await prefs.remove(IdentityService.avatarPrefKey);
+      await prefs.remove(IdentityService.instance.avatarKey);
     } else {
-      await prefs.setString(IdentityService.avatarPrefKey, value);
+      await prefs.setString(IdentityService.instance.avatarKey, value);
     }
     // Re-publish the identity so contacts pick the new picture up.
     await BrokerService.instance.advertiseEverywhere();
@@ -339,6 +341,27 @@ class _AccountPageState extends State<AccountPage> {
               title: Text(l10n.settingsProfile),
               tiles: <AbstractSettingsTile>[
                 CustomSettingsTile(child: _profilePictureTile()),
+                SettingsTile.navigation(
+                  leading: const Icon(Icons.switch_account_rounded),
+                  title: const Text('Accounts'),
+                  description: const Text(
+                      'Switch identity, use this account on another device, '
+                      'recovery code'),
+                  onPressed: (context) => Navigator.push(
+                    context,
+                    GlassPageRoute(page: const AccountsPage()),
+                  ),
+                ),
+                SettingsTile.navigation(
+                  leading: const Icon(Icons.qr_code_2_rounded),
+                  title: const Text('My contact code'),
+                  description:
+                      const Text('Let someone add you by QR code or link'),
+                  onPressed: (context) => Navigator.push(
+                    context,
+                    GlassPageRoute(page: const MyContactPage()),
+                  ),
+                ),
                 SettingsTile.navigation(
                   leading: const Icon(Icons.person_rounded),
                   title: Text(l10n.displayName),

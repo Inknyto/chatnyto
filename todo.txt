@@ -327,3 +327,135 @@ Done:     * Honest limit, stated in the UI: calls need both devices on the same 
 Done:       network. A LoRa link carries a few kilobits per second, which is enough for
 Done:       messages but not for voice, so the picker says so rather than failing
 Done:       mysteriously.
+Done: Phone calls now work. Two real bugs, both found by driving the app on your two
+Done: phones over ADB and reading the logs, plus one measured slowness:
+Done:   * The ring never arrived. Call signalling is wrapped as
+Done:     {'type': 'call', ...payload}, but an offer's payload carries its own 'type'
+Done:     (the SDP kind, "offer"), and it was spread AFTER the envelope's key — so it
+Done:     overwrote it. The receiver read type == "offer", failed to parse it as a chat
+Done:     message and dropped it. The envelope's kind is now written last, and the
+Done:     redundant SDP 'type' field is gone (it was never read).
+Done:   * The caller hung up on itself. The broker delivers our own publications back
+Done:     to us on the same topic, so the caller received its own offer, decided it was
+Done:     an incoming call while already busy, and sent a decline — ending the call it
+Done:     had just started. Every signal now carries the sender's fingerprint and our
+Done:     own signals are ignored, the same way chat messages already were.
+Done:   * Connecting took ~32 seconds. The ICE candidate list included 127.0.0.1 and
+Done:     ::1, which can never reach another device but still get paired and timed out
+Done:     on. Loopback candidates are no longer sent; the call now goes live in about
+Done:     0.4 seconds after it is answered.
+Done: Ringing is a real ring now, not a silent screen: an insistent, full-screen
+Done: notification on the call channel with a vibration pattern and Answer/Decline
+Done: actions, so a call comes through with the app in the background or the phone
+Done: locked, and can be picked up without opening the app. USE_FULL_SCREEN_INTENT and
+Done: VIBRATE were added to the manifest.
+Done: Signalling travels over MQTT, as asked, inside the pair's existing end-to-end
+Done: encrypted DM channel — no call server. Only the audio is direct WebRTC. Verified
+Done: end to end between the two phones: ring, answer, connected, timer running, over
+Done: both a LAN broker and the wss:// one.
+Done: Calling with no broker connected now says so immediately instead of ringing into
+Done: nothing, and the call screen names the network stage while connecting.
+Done: Tapping a picture in a chat opens it full screen on black, pinch-to-zoom up to
+Done: 6x, with the sender and the time in the bar. Two actions there:
+Done:   * Save — into the photo library (Android/iOS/macOS/Windows, via `gal`, in a
+Done:     "ChatNyto" album) or into the Downloads folder on Linux, which is the
+Done:     equivalent well-known place on a desktop.
+Done:   * Share — hands the file to any other app through the system sheet.
+Done: Pictures arrive inside the encrypted message rather than as a file, so nothing
+Done: exists on disk until you ask for it; saving is what writes the first copy out.
+Done: The network map is now handled directly:
+Done:   * Drag the background to pan, pinch to zoom (0.25x-4x, about the pinch centre
+Done:     so what is under your fingers stays there), or use the +/- buttons.
+Done:   * Drag any node to move it; the arrangement is kept across live updates so a
+Done:     broker reconnecting does not undo your layout. The reset button puts
+Done:     everything back and re-centres.
+Done:   * Tap a node for its details: a network shows its address, how many people are
+Done:     on it, and a switch that connects or disconnects it right there; a person
+Done:     shows which network they are reachable through and their public key; the
+Done:     centre shows what the map is made of.
+Done: The layout is now truthful about who is where: the broker that carried each
+Done: presence announcement is recorded, so people hang off the network that actually
+Done: announced them instead of being spread round-robin.
+Done: One bug found while testing on the phone: a tap was being swallowed as a
+Done: one-pixel pan, because the tap and scale recognisers compete. Taps are now
+Done: decided inside the scale gesture (a gesture that ends within 12px of where it
+Done: started is a tap), which is reliable.
+Done: The account model was rebuilt around the fact that an account IS its key pair,
+Done: not a row in a database — which is what makes all five of these one feature:
+Done:   * Same account on another device: "Transfer" shows a QR code carrying the same
+Done:     ciphertext this device stores. The private seeds never exist in the clear
+Done:     outside the app, and the code does not contain the password — the other
+Done:     device asks for it. The screen says plainly what the code is worth.
+Done:   * Deduplication by public key: an account is keyed by its X25519 public key, so
+Done:     importing one the device already holds refreshes it instead of listing it
+Done:     twice, however many devices it arrived from. Contacts are keyed the same way,
+Done:     so the same person scanned from a code and heard on the network is one entry.
+Done:   * Multiple accounts and identities: several identities live side by side, each
+Done:     with its own chats, contacts, outbox and profile picture — stored under its
+Done:     own scope and encrypted under its own key, so they are not merely hidden from
+Done:     each other but unreadable. Switching locks the old one and drops everything
+Done:     held for it. The account that existed before this change keeps the unsuffixed
+Done:     storage, so no existing chat moved (verified on both phones: every chat and
+Done:     picture survived the upgrade).
+Done:   * Contact sharing: "My contact code" gives a QR code and a chatnyto://contact
+Done:     link with your name and public keys — all public, safe to print or send.
+Done:     Scanning one saves the person, verified against their own signature, so you
+Done:     can write to them even when they are not on the air. The People tab merges
+Done:     saved contacts with whoever is announcing themselves, marking which is which.
+Done:   * Password recovery: a 120-bit recovery code is generated when an account is
+Done:     made and shown on its own screen, which cannot be skipped past without
+Done:     ticking that you wrote it down. It seals a second copy of the same seeds, so
+Done:     "Forgot your password?" on the unlock screen takes the code and lets you set
+Done:     a new password. It is honest crypto, not a back door: there is no third way
+Done:     in, and the screen says so. A fresh code can be issued at any time, which
+Done:     invalidates the old one.
+Done: The unlock screen also lists the other accounts on the device, so a second
+Done: identity is one tap away rather than hidden behind the lock.
+Done: Broker credentials are out of the interface and out of the app's own storage:
+Done:   * They now live in the platform keystore (Android Keystore, iOS Keychain,
+Done:     libsecret, DPAPI), not in shared preferences — which is a plain file any
+Done:     backup picks up. Brokers saved by an older build are migrated into the
+Done:     keystore on first load and the plain copies are erased.
+Done:   * They are read only by the code that opens the connection, never by a widget.
+Done:     The edit dialog no longer pre-fills a password: if one is on file it says so
+Done:     and offers to replace it. The sign-in fields are folded away entirely for the
+Done:     ordinary case.
+Done:   * The add-broker dialog now asks for the address first and nothing else —
+Done:     "supa-tech.com" is a complete answer. The app fetches
+Done:     https://<host>/.well-known/chatnyto.json over HTTPS and learns the WebSocket
+Done:     URL, the port and the account from it; the credential goes straight into the
+Done:     keystore, never displayed and never typed. A bare IP skips the lookup, which
+Done:     is what a LAN or LoRa broker needs.
+Done:   * The deployment serves that file: a small nginx container publishes
+Done:     /.well-known/chatnyto.json, generated by deploy.sh from PUBLIC_HOST/APP_USER/
+Done:     APP_PASSWORD in the env file, routed through the same Cloudflare tunnel. The
+Done:     README documents the second tunnel route.
+Done:   * Sharing a network by QR now carries the address alone by default; including
+Done:     the sign-in is a deliberate switch, and only then is the password read out of
+Done:     the keystore.
+Done: Verified on the phone: the Add broker dialog shows Address, Name and "This
+Done: network needs a sign-in" — no password field anywhere in sight.
+Done: Used exactly that way, and it is what found the real bugs. Both phones
+Done: (SM-G610F and COLOR_8) were driven over ADB — install, launch, screenshots read
+Done: back, taps and text injected, logcat followed — with a mosquitto broker on this
+Done: machine so the two could see each other. The three call bugs, and the map's
+Done: swallowed tap, were all found on the devices rather than by reading the code.
+Done: No blocking questions this round — the reported bug was reproducible and the
+Done: rest was specified clearly enough. Three judgement calls worth naming, all made
+Done: rather than asked because either answer left the work useful:
+Done:   * "Make the phone calls work over mqtt" — read as "make calls work; the
+Done:     signalling path is MQTT", not "carry the audio over MQTT". Signalling already
+Done:     went over MQTT and was where all three bugs were. Relaying the audio itself
+Done:     through the broker is possible but would need a PCM capture/playback plugin
+Done:     with no Linux support, so calling from the computer — your actual test — would
+Done:     still not work. Say the word if you want the audio relayed too, for the case
+Done:     where the two devices cannot reach each other directly.
+Done:   * Password recovery is a recovery code, not a reset. Anything that could let
+Done:     the app reopen an account without either the password or a second secret
+Done:     would be a back door in the encryption.
+Done:   * "Only the clean URL" is implemented as a published profile the server serves
+Done:     over HTTPS, so the app configures itself from the domain. The alternative —
+Done:     shipping a credential inside the binary — would have put it back in the app.
+Done: Not done, and needing you: ./deploy/deploy-remote.sh is still unrun. It now also
+Done: needs PUBLIC_HOST, APP_USER and APP_PASSWORD in deploy/.env.prod, and a second
+Done: Cloudflare route for /.well-known/*.

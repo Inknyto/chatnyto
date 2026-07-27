@@ -1,3 +1,4 @@
+# ~/Documents/git/chatnyto/deploy/docker-compose.yml 27 Jul 2026 at 12:31:28 PM
 # Production MQTT broker for ChatNyto.
 #
 # Nothing is published to the host: traffic arrives through the Cloudflare
@@ -37,12 +38,23 @@ services:
       retries: 3
       start_period: 10s
 
+  # Serves one file: /.well-known/chatnyto.json, which tells the app how to
+  # reach this broker. It is what makes typing just the domain enough — the
+  # user never sees a port, a WebSocket path or a password.
+  profile:
+    image: nginx:alpine
+    restart: unless-stopped
+    volumes:
+      - ./wellknown:/usr/share/nginx/html/.well-known:ro
+    # No `ports:` either; the tunnel routes /.well-known/ to it.
+
   tunnel:
     image: cloudflare/cloudflared:latest
     restart: unless-stopped
     command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
     depends_on:
       - mqtt
+      - profile
 
 volumes:
   mqtt-data:

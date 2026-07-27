@@ -8,6 +8,8 @@ import '../ais/ais_page.dart';
 import '../calls/calls_tab.dart';
 import '../core/brokers/broker_service.dart';
 import '../core/brokers/brokers_page.dart';
+import '../account/share_pages.dart';
+import '../core/crypto/contact_book.dart';
 import '../core/crypto/crypto_service.dart';
 import '../core/settings/wallpaper_picker.dart';
 import '../core/theme/theme_controller.dart';
@@ -427,18 +429,38 @@ class PeopleTab extends StatefulWidget {
 
 class _PeopleTabState extends State<PeopleTab> {
   final BrokerService _brokers = BrokerService.instance;
+  final ContactBook _contacts = ContactBook.instance;
   String _query = '';
 
   @override
   void initState() {
     super.initState();
     _brokers.addListener(_onChanged);
+    _contacts.addListener(_onChanged);
+    _contacts.load();
   }
 
   @override
   void dispose() {
     _brokers.removeListener(_onChanged);
+    _contacts.removeListener(_onChanged);
     super.dispose();
+  }
+
+  /// Adds someone from their contact code. It is the answer to the awkward
+  /// case the network cannot solve: reaching a person who is not currently
+  /// on the air.
+  Future<void> _scanContact() async {
+    final result = await Navigator.push<(ScanOutcome, String)?>(
+      context,
+      GlassPageRoute(page: const ContactScanPage()),
+    );
+    if (!mounted || result == null) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(result.$1 == ScanOutcome.contact
+          ? 'Saved ${result.$2} as a contact.'
+          : '${result.$2} is now on this device.'),
+    ));
   }
 
   void _onChanged() {
@@ -509,6 +531,27 @@ class _PeopleTabState extends State<PeopleTab> {
                 }
               },
             ),
+            // Keeping someone means keeping their key, so they stay
+            // reachable once they drop off the network.
+            TextButton.icon(
+              icon: Icon(
+                _contacts.knows(peer.x25519PublicKey)
+                    ? Icons.bookmark_remove_rounded
+                    : Icons.bookmark_add_rounded,
+                size: 18,
+              ),
+              label: Text(_contacts.knows(peer.x25519PublicKey)
+                  ? 'Forget this contact'
+                  : 'Save as contact'),
+              onPressed: () async {
+                if (_contacts.knows(peer.x25519PublicKey)) {
+                  await _contacts.remove(peer.x25519PublicKey);
+                } else {
+                  await _contacts.add(peer);
+                }
+                if (context.mounted) Navigator.pop(context);
+              },
+            ),
           ],
         ),
       ),
@@ -521,13 +564,19 @@ class _PeopleTabState extends State<PeopleTab> {
       future: _myFingerprint(),
       builder: (context, snapshot) {
         final myFp = snapshot.data ?? '';
-        final peers = _brokers.peers
+        // Saved contacts and whoever is announcing themselves right now,
+        // each appearing once: the same person heard on the network and
+        // scanned from a code is one entry, keyed by their public key.
+        final live = _brokers.peers;
+        final onAir =
+            live.map((p) => p.x25519PublicKey).toSet();
+        final peers = _contacts
+            .merged(live)
             .where((p) => p.fingerprint != myFp)
             .where((p) =>
                 _query.isEmpty ||
                 p.name.toLowerCase().contains(_query.toLowerCase()))
-            .toList()
-          ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+            .toList();
         final connected =
             _brokers.brokers.where(_brokers.isConnected).length;
         return ListView(
@@ -562,21 +611,33 @@ class _PeopleTabState extends State<PeopleTab> {
                     ? AppLocalizations.of(context)
                         .networksReachable(connected)
                     : AppLocalizations.of(context).turnOnLoraHint),
-                trailing: IconButton(
-                  tooltip: 'Retry connections',
-                  icon: const Icon(Icons.refresh_rounded),
-                  onPressed: () async {
-                    await _brokers.autoConnectAll();
-                    await _brokers.advertiseEverywhere();
-                  },
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
+                      tooltip: 'Add someone by code',
+                      icon: const Icon(Icons.qr_code_scanner_rounded),
+                      onPressed: _scanContact,
+                    ),
+                    IconButton(
+                      tooltip: 'Retry connections',
+                      icon: const Icon(Icons.refresh_rounded),
+                      onPressed: () async {
+                        await _brokers.autoConnectAll();
+                        await _brokers.advertiseEverywhere();
+                      },
+                    ),
+                  ],
                 ),
               ),
             ),
             for (final peer in peers)
               WaChatTile(
                 title: peer.name,
-                subtitle: AppLocalizations.of(context)
-                    .verifiedKey(peer.fingerprint),
+                subtitle: onAir.contains(peer.x25519PublicKey)
+                    ? AppLocalizations.of(context)
+                        .verifiedKey(peer.fingerprint)
+                    : 'Saved contact · ${peer.fingerprint}',
                 leadingIcon: null,
                 avatar: peer.avatar,
                 onTap: () => _showIdentity(peer),

@@ -10,9 +10,15 @@ import 'package:mqtt_client/mqtt_server_client.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../crypto/crypto_service.dart';
+import 'broker_credentials.dart';
 
-/// A named MQTT broker the user has registered. Username/password are
-/// optional, for brokers that require authentication.
+/// A named MQTT broker the user has registered.
+///
+/// [username] and [password] are carried in memory only — long enough to
+/// hand a newly added broker's sign-in to [BrokerCredentials], which keeps
+/// it in the platform keystore. They are deliberately absent from [toJson]
+/// so no credential is ever written to shared preferences, and the UI reads
+/// them back from nowhere.
 class Broker {
   Broker({
     required this.name,
@@ -47,11 +53,12 @@ class Broker {
         'name': name,
         'host': host,
         'port': port,
-        if (username.isNotEmpty) 'user': username,
-        if (password.isNotEmpty) 'pass': password,
         'auto': autoConnect,
       };
 
+  /// `user`/`pass` are only still read here to pick up brokers saved by an
+  /// older build; [BrokerService.load] moves them into the keystore and
+  /// rewrites the entry without them.
   static Broker fromJson(Map<String, dynamic> json) => Broker(
         name: json['name'] as String,
         host: json['host'] as String,
@@ -60,6 +67,8 @@ class Broker {
         password: json['pass'] as String? ?? '',
         autoConnect: json['auto'] as bool? ?? true,
       );
+
+  bool get hasLegacyCredentials => username.isNotEmpty || password.isNotEmpty;
 }
 
 /// How a broker's host string turns into an mqtt_client connection.
@@ -180,6 +189,9 @@ class BrokerService extends ChangeNotifier {
   final List<Broker> _brokers = [];
   final Map<String, MqttServerClient> _clients = {};
   final Map<String, PublicIdentity> _peers = {};
+
+  /// Fingerprint → name of the broker whose presence topic announced them.
+  final Map<String, String> _peerNetwork = {};
   final Map<String, PublicGroupAd> _publicGroups = {};
   bool _loaded = false;
   Timer? _heartbeat;
@@ -201,6 +213,9 @@ class BrokerService extends ChangeNotifier {
   List<Broker> get brokers => List.unmodifiable(_brokers);
   List<PublicIdentity> get peers => List.unmodifiable(_peers.values);
 
+  /// Which network a peer was last heard on, empty when unknown.
+  String networkOf(String fingerprint) => _peerNetwork[fingerprint] ?? '';
+
   bool isConnected(Broker broker) =>
       _clients[broker.name]?.connectionStatus?.state ==
       MqttConnectionState.connected;
@@ -213,6 +228,22 @@ class BrokerService extends ChangeNotifier {
       ..clear()
       ..addAll(stored
           .map((s) => Broker.fromJson(jsonDecode(s) as Map<String, dynamic>)));
+
+    // Brokers saved by an older build still carry their sign-in in shared
+    // preferences. Move it into the keystore once and rewrite the list, so
+    // the plain copy stops existing.
+    final legacy = _brokers.where((b) => b.hasLegacyCredentials).toList();
+    if (legacy.isNotEmpty) {
+      for (final broker in legacy) {
+        await BrokerCredentials.instance.save(
+          broker.name,
+          username: broker.username,
+          password: broker.password,
+        );
+      }
+      await _save();
+    }
+
     _loaded = true;
     notifyListeners();
   }
@@ -225,9 +256,18 @@ class BrokerService extends ChangeNotifier {
     );
   }
 
+  /// Registers [broker]. Any sign-in it carries is handed straight to the
+  /// keystore and never reaches the broker list on disk.
   Future<void> addBroker(Broker broker) async {
     _brokers.removeWhere((b) => b.name == broker.name);
     _brokers.add(broker);
+    if (broker.hasLegacyCredentials) {
+      await BrokerCredentials.instance.save(
+        broker.name,
+        username: broker.username,
+        password: broker.password,
+      );
+    }
     await _save();
     notifyListeners();
   }
@@ -256,6 +296,14 @@ class BrokerService extends ChangeNotifier {
   }
 
   Future<void> removeBroker(Broker broker) async {
+    await removeBrokerKeepingSignIn(broker);
+    await BrokerCredentials.instance.forget(broker.name);
+  }
+
+  /// Drops a broker from the list but leaves its stored sign-in alone —
+  /// used when editing, which removes and re-adds the entry and must not
+  /// make the user type the password again.
+  Future<void> removeBrokerKeepingSignIn(Broker broker) async {
     await disconnect(broker);
     _brokers.removeWhere((b) => b.name == broker.name);
     await _save();
@@ -287,10 +335,15 @@ class BrokerService extends ChangeNotifier {
     }
 
     client.onDisconnected = notifyListeners;
+    // The sign-in is fetched from the keystore at the moment of connecting;
+    // it is never held on the Broker the UI is showing.
+    final sign = await BrokerCredentials.instance.read(broker.name);
+    final username = sign.username.isNotEmpty ? sign.username : broker.username;
+    final password = sign.password.isNotEmpty ? sign.password : broker.password;
     try {
       await client.connect(
-        broker.username.isEmpty ? null : broker.username,
-        broker.password.isEmpty ? null : broker.password,
+        username.isEmpty ? null : username,
+        password.isEmpty ? null : password,
       );
     } catch (_) {
       client.disconnect();
@@ -330,6 +383,9 @@ class BrokerService extends ChangeNotifier {
           final identity = PublicIdentity.fromJson(json);
           if (identity != null && await identity.verify()) {
             _peers[identity.fingerprint] = identity;
+            // Remembering which broker carried the announcement is what
+            // lets the network map show who is reachable through what.
+            _peerNetwork[identity.fingerprint] = broker.name;
             notifyListeners();
           }
         } catch (_) {

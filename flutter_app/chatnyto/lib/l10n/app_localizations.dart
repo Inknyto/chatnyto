@@ -635,7 +635,7 @@ abstract class AppLocalizations {
   /// No description provided for @brokerHost.
   ///
   /// In en, this message translates to:
-  /// **'Host (IP or hostname)'**
+  /// **'Address'**
   String get brokerHost;
 
   /// No description provided for @brokerPort.
@@ -661,6 +661,66 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Password (optional)'**
   String get brokerPassword;
+
+  /// No description provided for @forgotPassword.
+  ///
+  /// In en, this message translates to:
+  /// **'Forgot your password?'**
+  String get forgotPassword;
+
+  /// No description provided for @otherAccounts.
+  ///
+  /// In en, this message translates to:
+  /// **'Other accounts on this device'**
+  String get otherAccounts;
+
+  /// No description provided for @undo.
+  ///
+  /// In en, this message translates to:
+  /// **'Undo'**
+  String get undo;
+
+  /// No description provided for @replace.
+  ///
+  /// In en, this message translates to:
+  /// **'Replace'**
+  String get replace;
+
+  /// No description provided for @signInWillBeRemoved.
+  ///
+  /// In en, this message translates to:
+  /// **'The saved sign-in will be removed'**
+  String get signInWillBeRemoved;
+
+  /// No description provided for @signInSaved.
+  ///
+  /// In en, this message translates to:
+  /// **'A sign-in is saved for this network'**
+  String get signInSaved;
+
+  /// No description provided for @needsSignIn.
+  ///
+  /// In en, this message translates to:
+  /// **'This network needs a sign-in'**
+  String get needsSignIn;
+
+  /// No description provided for @brokerPortOptional.
+  ///
+  /// In en, this message translates to:
+  /// **'Port (only if it is not the standard one)'**
+  String get brokerPortOptional;
+
+  /// No description provided for @brokerNameHelp.
+  ///
+  /// In en, this message translates to:
+  /// **'Optional. Left empty, the network names itself.'**
+  String get brokerNameHelp;
+
+  /// No description provided for @brokerHostHelp.
+  ///
+  /// In en, this message translates to:
+  /// **'Just the address of the network — the server fills in the rest. A broker on your own network can be given as an IP.'**
+  String get brokerHostHelp;
 
   /// No description provided for @searchNetworks.
   ///

@@ -7,6 +7,7 @@ import '../calls/call_service.dart';
 import '../core/brokers/broker_service.dart';
 import '../core/crypto/crypto_service.dart';
 import '../core/media/image_service.dart';
+import '../core/media/image_viewer.dart';
 import '../core/notifications/notification_service.dart';
 import '../core/settings/wallpaper_picker.dart';
 import '../core/theme/background_controller.dart';
@@ -655,6 +656,19 @@ class _RevampChatPageState extends State<RevampChatPage> {
 /// Preview text stored with a picture that has no caption.
 const _photoLabel = '📷 Photo';
 
+/// "14 Mar, 21:05" for the header of the full-screen picture.
+String _sentAtLabel(int ts) {
+  if (ts == 0) return '';
+  final at = DateTime.fromMillisecondsSinceEpoch(ts);
+  const months = [
+    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+  ];
+  final hour = at.hour.toString().padLeft(2, '0');
+  final minute = at.minute.toString().padLeft(2, '0');
+  return '${at.day} ${months[at.month - 1]}, $hour:$minute';
+}
+
 /// Renders a message body: the attached picture when there is one, a
 /// read-only Quill document when the sender used formatting, plain text
 /// otherwise (which is also what older clients and LoRa-sized messages
@@ -672,9 +686,23 @@ class _MessageBody extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(10),
-            child: Image.memory(picture, fit: BoxFit.cover),
+          // Tapping opens it full screen, where it can be zoomed, saved or
+          // passed to another app.
+          GestureDetector(
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute<void>(
+                builder: (_) => ImageViewerPage(
+                  bytes: picture,
+                  title: message.name,
+                  subtitle: _sentAtLabel(message.ts),
+                ),
+              ),
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(10),
+              child: Image.memory(picture, fit: BoxFit.cover),
+            ),
           ),
           if (message.text.isNotEmpty && message.text != _photoLabel)
             Padding(

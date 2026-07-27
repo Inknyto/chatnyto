@@ -173,10 +173,15 @@ class ChatService extends ChangeNotifier {
 
   static final ChatService instance = ChatService._();
 
-  static const _chatsKey = 'revamp.chats.v1';
-  static const _legacyMsgsKeyPrefix = 'revamp.msgs.';
-  static const _encMsgsKeyPrefix = 'revamp.msgs.enc.';
-  static const _encOutboxKey = 'revamp.outbox.enc';
+  // Each account keeps its own chats, history and outbox. The suffix is the
+  // account's scope, empty for the first account on the device so its data
+  // stays exactly where earlier builds put it.
+  String get _chatsKey => 'revamp.chats.v1${IdentityService.instance.scope}';
+  String get _legacyMsgsKeyPrefix => 'revamp.msgs.';
+  String get _encMsgsKeyPrefix =>
+      'revamp.msgs.enc${IdentityService.instance.scope}.';
+  String get _encOutboxKey =>
+      'revamp.outbox.enc${IdentityService.instance.scope}';
   static const _maxStoredMessages = 200;
   static const _maxReplayMessages = 50;
   static const _replayCooldown = Duration(minutes: 2);
@@ -207,6 +212,18 @@ class ChatService extends ChangeNotifier {
     brokers.onHeartbeat = _onHeartbeat;
     brokers.addListener(_onBrokersChanged);
     brokers.startHeartbeat();
+    notifyListeners();
+  }
+
+  /// Forgets everything held for the account that was in use, so switching
+  /// identity starts from that account's own storage rather than showing
+  /// the previous one's chat list.
+  void reset() {
+    _chats.clear();
+    _messages.clear();
+    _outbox.clear();
+    _lastReplyAt.clear();
+    _initialized = false;
     notifyListeners();
   }
 
@@ -666,8 +683,18 @@ class ChatService extends ChangeNotifier {
       ChatEntry chat, Map<String, dynamic> data) async {
     final key = await _keyFor(chat);
     if (key == null) return;
+    // `type` is written last on purpose: the payload carries keys of its own
+    // and must never be able to overwrite the envelope's kind, or the other
+    // side files the signal away as a chat message and the phone never rings.
+    //
+    // `from` is what lets the other end — and this end — tell whose signal it
+    // is. The broker delivers our own publications straight back to us, so
+    // without it a device answers its own ring.
+    final me = IdentityService.instance.isUnlocked
+        ? (await IdentityService.instance.publicIdentity()).fingerprint
+        : '';
     final envelope = await MessageCrypto.encryptEnvelope(
-        jsonEncode({'type': 'call', ...data}), key);
+        jsonEncode({...data, 'type': 'call', 'from': me}), key);
     BrokerService.instance.publishToAll(chat.topic, envelope);
   }
 
@@ -753,7 +780,13 @@ class ChatService extends ChangeNotifier {
     }
     if (data['type'] == 'call') {
       // Ring/answer/ICE traffic rides inside the pair's encrypted channel,
-      // so calls need no server of their own.
+      // so calls need no server of their own. Our own signalling comes back
+      // from the broker on the same topic: ignore it, or the caller rings
+      // itself, finds itself busy, and declines its own call.
+      if (IdentityService.instance.isUnlocked) {
+        final me = (await IdentityService.instance.publicIdentity()).fingerprint;
+        if (data['from'] == me) return;
+      }
       await onCallSignal?.call(chat, data);
       return;
     }

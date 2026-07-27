@@ -48,7 +48,10 @@ class _CallPageState extends State<CallPage> {
       case CallState.ringing:
         return 'Incoming call';
       case CallState.connecting:
-        return 'Connecting…';
+        // Naming the network stage turns a hang into something diagnosable.
+        return _calls.iceState.isEmpty
+            ? 'Connecting…'
+            : 'Connecting… (${_calls.iceState.toLowerCase()})';
       case CallState.active:
         return _calls.elapsedLabel;
       case CallState.ended:
