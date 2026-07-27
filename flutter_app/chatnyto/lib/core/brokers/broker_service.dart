@@ -1,3 +1,4 @@
+// ~/Documents/git/chatnyto/flutter_app/chatnyto/lib/core/brokers/broker_service.dart 27 Jul 2026 at 01:36:24 PM
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -64,11 +65,11 @@ class Broker {
 /// How a broker's host string turns into an mqtt_client connection.
 ///
 /// Accepted forms:
-///   192.168.4.1                → plain MQTT on the broker's port
+///   192.168.4.1                 → plain MQTT on the broker's port
 ///   mqtt://host  / mqtts://host → plain / TLS MQTT
 ///   ws://host/mqtt / wss://host/mqtt → MQTT over WebSockets, which is what
-///                                works through an HTTPS reverse proxy or a
-///                                Cloudflare-style tunnel
+///                                       works through an HTTPS reverse proxy or a
+///                                       Cloudflare-style tunnel
 /// A port in the URL wins over the broker's configured port; otherwise the
 /// scheme's default applies (1883, 8883, 80, 443).
 class _BrokerAddress {
@@ -79,9 +80,14 @@ class _BrokerAddress {
     required this.webSocket,
   });
 
+  /// Server hostname or WebSocket URL passed to MqttServerClient.
   final String server;
+
   final int port;
+
+  /// Used ONLY for raw TCP TLS (mqtts://), NOT for WSS.
   final bool secure;
+
   final bool webSocket;
 
   static _BrokerAddress parse(Broker broker) {
@@ -95,25 +101,29 @@ class _BrokerAddress {
         webSocket: false,
       );
     }
+
     final scheme = match.group(1)!.toLowerCase();
     final uri = Uri.parse(raw);
     final isWebSocket = scheme == 'ws' || scheme == 'wss';
     final isSecure = scheme == 'wss' || scheme == 'mqtts' || scheme == 'ssl';
-    final defaultPort = isWebSocket ? (isSecure ? 443 : 80) : (isSecure ? 8883 : 1883);
+    final defaultPort =
+        isWebSocket ? (isSecure ? 443 : 80) : (isSecure ? 8883 : 1883);
+
     final port = uri.hasPort
         ? uri.port
         : (broker.port != 1883 ? broker.port : defaultPort);
+
     if (isWebSocket) {
-      // mqtt_client wants the scheme and path for websockets, but the port
-      // is passed separately.
+      // For websockets, MqttServerClient requires the full ws:// or wss:// URL string as the server parameter.
       final path = uri.path.isEmpty ? '/mqtt' : uri.path;
       return _BrokerAddress(
         server: '$scheme://${uri.host}$path',
         port: port,
-        secure: isSecure,
+        secure: false, // WSS handles TLS internally; setting client.secure=true causes raw TCP TLS failure.
         webSocket: true,
       );
     }
+
     return _BrokerAddress(
       server: uri.host.isEmpty ? raw : uri.host,
       port: port,
@@ -263,15 +273,19 @@ class BrokerService extends ChangeNotifier {
     final clientId =
         'chatnyto-${DateTime.now().millisecondsSinceEpoch % 1000000}';
     final address = _BrokerAddress.parse(broker);
+
     final client =
         MqttServerClient.withPort(address.server, clientId, address.port)
           ..keepAlivePeriod = 30
-          ..autoReconnect = true
-          ..useWebSocket = address.webSocket
-          ..secure = address.secure;
+          ..autoReconnect = true;
+
     if (address.webSocket) {
+      client.useWebSocket = true;
       client.websocketProtocols = MqttClientConstants.protocolsSingleDefault;
+    } else if (address.secure) {
+      client.secure = true;
     }
+
     client.onDisconnected = notifyListeners;
     try {
       await client.connect(
@@ -516,7 +530,8 @@ class BrokerService extends ChangeNotifier {
         ...idBytes,
       ];
       final body = [...variableHeader, ...payload];
-      socket.add(Uint8List.fromList([0x10, ..._remainingLength(body.length), ...body]));
+      socket.add(Uint8List.fromList(
+          [0x10, ..._remainingLength(body.length), ...body]));
       await socket.flush();
       final response = await socket
           .timeout(const Duration(milliseconds: 700))
