@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
@@ -49,6 +50,7 @@ class NotificationService {
           macOS: DarwinInitializationSettings(),
           linux: LinuxInitializationSettings(defaultActionName: 'Open'),
         ),
+        onDidReceiveNotificationResponse: _onResponse,
       );
       _available = true;
       await requestPermission();
@@ -168,6 +170,84 @@ class NotificationService {
       );
     } catch (error) {
       debugPrint('Could not show notification: $error');
+    }
+  }
+
+  // ---------------------------------------------------------------- calls
+
+  /// Fixed id, so the ringing notification can always be taken back down.
+  static const _callNotificationId = 424242;
+
+  /// Answer/decline chosen from the ringing notification. Wired to the call
+  /// service so a call can be picked up without unlocking the phone first.
+  void Function(bool answered)? onCallAction;
+
+  static void _onResponse(NotificationResponse response) {
+    switch (response.actionId) {
+      case 'answer':
+        instance.onCallAction?.call(true);
+      case 'decline':
+        instance.onCallAction?.call(false);
+    }
+  }
+
+  /// Rings for an incoming call: an insistent, full-screen notification that
+  /// keeps sounding until it is answered or declined — a call has to be able
+  /// to interrupt, which is the one place a quiet notification is wrong.
+  Future<void> showIncomingCall(String caller) async {
+    await init();
+    if (!_available) return;
+    try {
+      await _plugin.show(
+        _callNotificationId,
+        caller.isEmpty ? 'Incoming call' : caller,
+        'ChatNyto voice call',
+        NotificationDetails(
+          android: AndroidNotificationDetails(
+            'chatnyto_calls',
+            'Calls',
+            channelDescription: 'Incoming voice calls',
+            importance: Importance.max,
+            priority: Priority.max,
+            category: AndroidNotificationCategory.call,
+            // Puts the call screen in front even from the lock screen.
+            fullScreenIntent: true,
+            // Stays up, and keeps sounding, until the call is dealt with.
+            ongoing: true,
+            autoCancel: false,
+            audioAttributesUsage: AudioAttributesUsage.notificationRingtone,
+            vibrationPattern:
+                Int64List.fromList(<int>[0, 700, 600, 700, 600, 700]),
+            // FLAG_INSISTENT: loop the tone rather than playing it once.
+            additionalFlags: Int32List.fromList(<int>[4]),
+            actions: const <AndroidNotificationAction>[
+              AndroidNotificationAction('answer', 'Answer',
+                  showsUserInterface: true),
+              AndroidNotificationAction('decline', 'Decline',
+                  cancelNotification: true),
+            ],
+          ),
+          iOS: const DarwinNotificationDetails(
+            interruptionLevel: InterruptionLevel.timeSensitive,
+          ),
+          macOS: const DarwinNotificationDetails(),
+          linux: const LinuxNotificationDetails(
+            urgency: LinuxNotificationUrgency.critical,
+          ),
+        ),
+      );
+    } catch (error) {
+      debugPrint('Could not ring: $error');
+    }
+  }
+
+  /// Stops the ringing, whatever ended the call.
+  Future<void> cancelIncomingCall() async {
+    if (!_available) return;
+    try {
+      await _plugin.cancel(_callNotificationId);
+    } catch (error) {
+      debugPrint('Could not stop ringing: $error');
     }
   }
 }

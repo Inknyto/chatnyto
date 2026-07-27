@@ -297,7 +297,7 @@ class AppLocalizationsFr extends AppLocalizations {
   String get brokerName => 'Nom';
 
   @override
-  String get brokerHost => 'Hôte (IP ou nom)';
+  String get brokerHost => 'Adresse';
 
   @override
   String get brokerPort => 'Port';
@@ -311,6 +311,39 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get brokerPassword => 'Mot de passe (facultatif)';
+
+  @override
+  String get forgotPassword => 'Mot de passe oublié ?';
+
+  @override
+  String get otherAccounts => 'Autres comptes sur cet appareil';
+
+  @override
+  String get undo => 'Annuler';
+
+  @override
+  String get replace => 'Remplacer';
+
+  @override
+  String get signInWillBeRemoved =>
+      'L\'identification enregistrée sera supprimée';
+
+  @override
+  String get signInSaved => 'Une identification est enregistrée pour ce réseau';
+
+  @override
+  String get needsSignIn => 'Ce réseau demande une identification';
+
+  @override
+  String get brokerPortOptional => 'Port (seulement s\'il n\'est pas standard)';
+
+  @override
+  String get brokerNameHelp =>
+      'Facultatif. Laissé vide, le réseau se nomme lui-même.';
+
+  @override
+  String get brokerHostHelp =>
+      'Juste l\'adresse du réseau — le serveur complète le reste. Un broker sur votre propre réseau peut être indiqué par son IP.';
 
   @override
   String get searchNetworks => 'Rechercher réseaux et personnes';

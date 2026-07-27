@@ -7,6 +7,7 @@ import '../core/crypto/password_vault.dart';
 import '../core/notifications/background_service.dart';
 import '../core/notifications/notification_service.dart';
 import '../core/widgets/liquid_glass.dart';
+import '../account/recovery_pages.dart';
 import '../l10n/app_localizations.dart';
 import 'chat_service.dart';
 import 'home_shell.dart';
@@ -124,6 +125,8 @@ class _SetupScreenState extends State<SetupScreen> {
       _error = null;
     });
     await IdentityService.instance.create(name, password);
+    final recoveryCode = IdentityService.instance.pendingRecoveryCode;
+    IdentityService.instance.pendingRecoveryCode = null;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('profile.name', name);
     // Remembered by default so the app opens straight into the chats; the
@@ -131,6 +134,15 @@ class _SetupScreenState extends State<SetupScreen> {
     await PasswordVault.instance.remember(password);
     await _startServices();
     if (!mounted) return;
+    // Shown before the chats, while it still obviously belongs to setting
+    // the account up. There is no second chance to hand out this code.
+    if (recoveryCode != null) {
+      await Navigator.push(
+        context,
+        GlassPageRoute(page: RecoveryCodePage(code: recoveryCode)),
+      );
+      if (!mounted) return;
+    }
     Navigator.pushAndRemoveUntil(
       context,
       GlassPageRoute(page: const HomeShell()),
@@ -235,11 +247,35 @@ class _UnlockScreenState extends State<UnlockScreen> {
   bool _rememberMe = true;
   String? _error;
 
+  /// Accounts on this device other than the one being unlocked, so a second
+  /// identity is one tap away rather than hidden behind the lock screen.
+  List<StoredAccount> _others = [];
+
   @override
   void initState() {
     super.initState();
     PasswordVault.instance.askEveryOpen().then((ask) {
       if (mounted) setState(() => _rememberMe = !ask);
+    });
+    IdentityService.instance.exists().then((_) {
+      if (!mounted) return;
+      setState(() => _others = IdentityService.instance.accounts
+          .where((a) => a.id != IdentityService.instance.activeAccountId)
+          .toList());
+    });
+  }
+
+  /// Makes another account the one this screen unlocks.
+  Future<void> _switchTo(StoredAccount account) async {
+    await IdentityService.instance.switchTo(account.id);
+    ChatService.instance.reset();
+    _passwordController.clear();
+    if (!mounted) return;
+    setState(() {
+      _error = null;
+      _others = IdentityService.instance.accounts
+          .where((a) => a.id != account.id)
+          .toList();
     });
   }
 
@@ -338,6 +374,54 @@ class _UnlockScreenState extends State<UnlockScreen> {
                         )
                       : Text(l10n.unlockButton),
                 ),
+                // The password is the only thing standing between the user
+                // and their keys, so the way back in belongs right here,
+                // not buried in a settings page they cannot reach yet.
+                TextButton(
+                  onPressed: () async {
+                    final done = await Navigator.push<bool>(
+                      context,
+                      GlassPageRoute(page: const RecoverAccountPage()),
+                    );
+                    if (done != true || !mounted) return;
+                    await _startServices();
+                    if (!mounted) return;
+                    Navigator.pushAndRemoveUntil(
+                      context,
+                      GlassPageRoute(page: const HomeShell()),
+                      (route) => false,
+                    );
+                  },
+                  child: Text(l10n.forgotPassword),
+                ),
+                if (_others.isNotEmpty) ...[
+                  const Divider(height: 32),
+                  Text(
+                    l10n.otherAccounts,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                  const SizedBox(height: 8),
+                  for (final account in _others)
+                    LiquidGlass(
+                      margin: const EdgeInsets.symmetric(vertical: 4),
+                      child: ListTile(
+                        dense: true,
+                        leading: CircleAvatar(
+                          radius: 16,
+                          child: Text(
+                            account.name.isEmpty
+                                ? '?'
+                                : account.name[0].toUpperCase(),
+                            style: const TextStyle(fontSize: 13),
+                          ),
+                        ),
+                        title: Text(account.name),
+                        trailing: const Icon(Icons.login_rounded, size: 18),
+                        onTap: () => _switchTo(account),
+                      ),
+                    ),
+                ],
               ],
             ),
           ),

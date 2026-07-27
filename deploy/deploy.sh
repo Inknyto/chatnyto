@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# ~/Documents/git/chatnyto/deploy/deploy.sh 27 Jul 2026 at 12:31:16 PM
 # Brings up the ChatNyto MQTT broker on the server.
 #
 # Runs ON the server (deploy-remote.sh calls it over SSH). It expects an env
@@ -13,8 +14,8 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 TARGET="${1:-all}"
-case "$TARGET" in all|users) ;; *)
-  echo "Usage: $0 [users]  (no argument = deploy everything)" >&2; exit 2;;
+case "$TARGET" in all|users|profile) ;; *)
+  echo "Usage: $0 [users|profile]  (no argument = deploy everything)" >&2; exit 2;;
 esac
 
 ENV_FILE="${ENV_FILE:-deploy/.env.prod}"
@@ -50,8 +51,37 @@ write_users() {
   echo "==> Wrote $(grep -c : "$passwd") account(s) to $passwd"
 }
 
+# --- published profile -------------------------------------------------------
+# The app should only ever need the address the user already knows. This file
+# answers for the server: where its broker is, and which account to use. It is
+# fetched over HTTPS and the credential goes straight into the device
+# keystore, so it is never typed and never displayed.
+write_profile() {
+  # shellcheck disable=SC1090
+  set -a; . "$ENV_FILE"; set +a
+  : "${PUBLIC_HOST:?Set PUBLIC_HOST in $ENV_FILE (e.g. supa-tech.com)}"
+  : "${APP_USER:?Set APP_USER in $ENV_FILE (an account from MQTT_USERS)}"
+  : "${APP_PASSWORD:?Set APP_PASSWORD in $ENV_FILE}"
+
+  mkdir -p deploy/wellknown
+  local out="deploy/wellknown/chatnyto.json"
+  cat > "$out" <<JSON
+{
+  "name": "${PUBLIC_NAME:-$PUBLIC_HOST}",
+  "url": "wss://${PUBLIC_HOST}/mqtt",
+  "username": "${APP_USER}",
+  "password": "${APP_PASSWORD}"
+}
+JSON
+  chmod 644 "$out"
+  echo "==> Wrote $out (wss://${PUBLIC_HOST}/mqtt as ${APP_USER})"
+}
+
 echo "==> Writing broker accounts"
 write_users
+echo "==> Writing the published profile"
+write_profile
+[ "$TARGET" = "profile" ] && { "${COMPOSE[@]}" up -d profile; exit 0; }
 [ "$TARGET" = "users" ] && { "${COMPOSE[@]}" restart mqtt; exit 0; }
 
 echo "==> Starting the broker and the tunnel"

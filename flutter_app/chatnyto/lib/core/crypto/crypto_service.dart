@@ -155,33 +155,228 @@ class PublicIdentity {
   }
 }
 
-/// Manages the local user identity: creation, password-encrypted storage,
-/// unlocking, presence advertisement payloads and ECDH shared secrets.
+/// One account as it sits on disk: a name, the public half of its keys in
+/// the clear, and the private seeds encrypted twice over — once under the
+/// password and once under the recovery code.
+///
+/// The public keys are stored unencrypted on purpose. They are public by
+/// definition, and having them without unlocking is what lets the account
+/// list show who each account is, and lets an import recognise an account
+/// the device already holds instead of duplicating it.
+class StoredAccount {
+  StoredAccount({
+    required this.id,
+    required this.name,
+    required this.x25519PublicKey,
+    required this.ed25519PublicKey,
+    required this.vault,
+    this.recovery,
+    this.legacy = false,
+  });
+
+  /// Base64 X25519 public key once known — the account's real identity.
+  /// A record migrated from the single-identity build carries a placeholder
+  /// until its first unlock reveals the keys.
+  final String id;
+
+  final String name;
+  final String x25519PublicKey;
+  final String ed25519PublicKey;
+
+  /// salt/nonce/cipher/mac of the seeds under the password.
+  final Map<String, dynamic> vault;
+
+  /// The same seeds under the recovery code, when one was kept.
+  final Map<String, dynamic>? recovery;
+
+  /// True for the account carried over from the single-identity build. Its
+  /// chats live under the unsuffixed storage keys, so it keeps them.
+  final bool legacy;
+
+  bool get hasRecovery => recovery != null;
+  bool get keysKnown => x25519PublicKey.isNotEmpty;
+
+  /// Short, readable form of the public key, as shown next to a peer.
+  String get fingerprint {
+    if (!keysKnown) return '';
+    return base64Decode(x25519PublicKey)
+        .sublist(0, 8)
+        .map((b) => b.toRadixString(16).padLeft(2, '0'))
+        .join(':');
+  }
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'name': name,
+        'x25519': x25519PublicKey,
+        'ed25519': ed25519PublicKey,
+        'vault': vault,
+        if (recovery != null) 'recovery': recovery,
+        if (legacy) 'legacy': true,
+      };
+
+  static StoredAccount fromJson(Map<String, dynamic> json) => StoredAccount(
+        id: json['id'] as String,
+        name: json['name'] as String? ?? 'Account',
+        x25519PublicKey: json['x25519'] as String? ?? '',
+        ed25519PublicKey: json['ed25519'] as String? ?? '',
+        vault: (json['vault'] as Map).cast<String, dynamic>(),
+        recovery: (json['recovery'] as Map?)?.cast<String, dynamic>(),
+        legacy: json['legacy'] as bool? ?? false,
+      );
+
+  StoredAccount copyWith({
+    String? id,
+    String? name,
+    String? x25519PublicKey,
+    String? ed25519PublicKey,
+    Map<String, dynamic>? vault,
+    Map<String, dynamic>? recovery,
+  }) =>
+      StoredAccount(
+        id: id ?? this.id,
+        name: name ?? this.name,
+        x25519PublicKey: x25519PublicKey ?? this.x25519PublicKey,
+        ed25519PublicKey: ed25519PublicKey ?? this.ed25519PublicKey,
+        vault: vault ?? this.vault,
+        recovery: recovery ?? this.recovery,
+        legacy: legacy,
+      );
+}
+
+/// Manages the user's accounts: creation, password-encrypted storage,
+/// unlocking, switching, transfer to another device, recovery, presence
+/// advertisement payloads and ECDH shared secrets.
+///
+/// One person can hold several identities — a personal one and a work one,
+/// say — and the same identity can live on several devices. Both come from
+/// the same fact: an account *is* its key pair, so it is defined by the key
+/// rather than by the device. Two records with the same public key are the
+/// same account and are merged rather than listed twice.
 class IdentityService {
   IdentityService._();
 
   static final IdentityService instance = IdentityService._();
 
-  static const _prefKey = 'identity.v1';
+  /// Single-identity storage from earlier builds, migrated on first load.
+  static const _legacyPrefKey = 'identity.v1';
+  static const _accountsKey = 'accounts.v2';
+  static const _activeKey = 'accounts.active';
   static const _pbkdf2Iterations = 210000;
+
+  /// Iterations for the recovery code. It is 120 random bits rather than a
+  /// human-chosen password, so it does not need the same brute-force
+  /// stretching — and unlocking with it should not take a visible pause on
+  /// an old phone.
+  static const _recoveryIterations = 20000;
 
   SimpleKeyPair? _x25519KeyPair;
   SimpleKeyPair? _ed25519KeyPair;
   String? _displayName;
   SecretKey? _storageKey;
+  String _activeId = '';
+  String _scope = '';
+
+  final List<StoredAccount> _accounts = [];
+  bool _accountsLoaded = false;
 
   bool get isUnlocked => _x25519KeyPair != null;
   String? get displayName => _displayName;
 
-  Future<bool> exists() async {
+  List<StoredAccount> get accounts => List.unmodifiable(_accounts);
+  String get activeAccountId => _activeId;
+
+  StoredAccount? get activeAccount =>
+      _accounts.where((a) => a.id == _activeId).firstOrNull;
+
+  /// Suffix that separates one account's stored data from another's. The
+  /// migrated account keeps the empty suffix, so its existing chats, outbox
+  /// and profile picture stay exactly where they are.
+  String get scope => _scope;
+
+  /// The recovery code produced by the last [create] or
+  /// [regenerateRecoveryCode]. Held only until the UI has shown it — it is
+  /// never written down anywhere by the app, because a copy on the device
+  /// would defeat the point.
+  String? pendingRecoveryCode;
+
+  // -------------------------------------------------------- account store
+
+  Future<void> _loadAccounts() async {
+    if (_accountsLoaded) return;
     final prefs = await SharedPreferences.getInstance();
-    return prefs.containsKey(_prefKey);
+    final stored = prefs.getStringList(_accountsKey);
+    if (stored != null) {
+      _accounts
+        ..clear()
+        ..addAll(stored.map(
+            (s) => StoredAccount.fromJson(jsonDecode(s) as Map<String, dynamic>)));
+    } else {
+      // First run of this build: adopt the single identity, if there is one.
+      final legacy = prefs.getString(_legacyPrefKey);
+      if (legacy != null) {
+        final data = jsonDecode(legacy) as Map<String, dynamic>;
+        _accounts.add(StoredAccount(
+          // The public keys only appear once the password decrypts the
+          // seeds, so the record is identified by a placeholder until then.
+          id: 'legacy',
+          name: data['name'] as String? ?? 'Account',
+          x25519PublicKey: '',
+          ed25519PublicKey: '',
+          vault: {
+            'salt': data['salt'],
+            'nonce': data['nonce'],
+            'cipher': data['cipher'],
+            'mac': data['mac'],
+          },
+          legacy: true,
+        ));
+        await _saveAccounts();
+      }
+    }
+    _activeId = prefs.getString(_activeKey) ??
+        (_accounts.isEmpty ? '' : _accounts.first.id);
+    _scope = _scopeFor(_activeId);
+    _accountsLoaded = true;
   }
 
-  static Future<SecretKey> _passwordKey(String password, List<int> salt) {
+  Future<void> _saveAccounts() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(
+      _accountsKey,
+      _accounts.map((a) => jsonEncode(a.toJson())).toList(),
+    );
+  }
+
+  String _scopeFor(String accountId) {
+    final account = _accounts.where((a) => a.id == accountId).firstOrNull;
+    if (account == null || account.legacy) return '';
+    // Short, stable and filesystem-safe: the account's own key, hashed down
+    // to something short enough to prefix a preferences key with.
+    return '.${sha256Short(accountId)}';
+  }
+
+  /// First 8 hex characters of the SHA-256 of [value] — used to namespace an
+  /// account's stored data.
+  static String sha256Short(String value) {
+    var hash = 0x811c9dc5;
+    for (final unit in utf8.encode(value)) {
+      hash ^= unit;
+      hash = (hash * 0x01000193) & 0xffffffff;
+    }
+    return hash.toRadixString(16).padLeft(8, '0');
+  }
+
+  Future<bool> exists() async {
+    await _loadAccounts();
+    return _accounts.isNotEmpty;
+  }
+
+  static Future<SecretKey> _passwordKey(String password, List<int> salt,
+      {int iterations = _pbkdf2Iterations}) {
     final pbkdf2 = Pbkdf2(
       macAlgorithm: Hmac.sha256(),
-      iterations: _pbkdf2Iterations,
+      iterations: iterations,
       bits: 256,
     );
     return pbkdf2.deriveKeyFromPassword(password: password, nonce: salt);
@@ -192,79 +387,321 @@ class IdentityService {
     return List<int>.generate(length, (_) => rng.nextInt(256));
   }
 
-  /// Creates a new identity and stores it encrypted under [password].
-  Future<PublicIdentity> create(String displayName, String password) async {
-    final x = X25519();
-    final ed = Ed25519();
-    final xPair = await x.newKeyPair();
-    final edPair = await ed.newKeyPair();
-
-    final xSeed = await xPair.extractPrivateKeyBytes();
-    final edSeed = await edPair.extractPrivateKeyBytes();
-
+  /// Seals [seeds] under [secret], returning the salt/nonce/cipher/mac.
+  static Future<Map<String, dynamic>> _seal(
+      String seeds, String secret, int iterations) async {
     final salt = _randomBytes(16);
-    final key = await _passwordKey(password, salt);
+    final key = await _passwordKey(secret, salt, iterations: iterations);
     final aes = AesGcm.with256bits();
-    final nonce = aes.newNonce();
-    final secretJson = jsonEncode({
-      'x': base64Encode(xSeed),
-      'ed': base64Encode(edSeed),
-    });
     final box = await aes.encrypt(
-      utf8.encode(secretJson),
+      utf8.encode(seeds),
       secretKey: key,
-      nonce: nonce,
+      nonce: aes.newNonce(),
+    );
+    return {
+      'salt': base64Encode(salt),
+      'nonce': base64Encode(box.nonce),
+      'cipher': base64Encode(box.cipherText),
+      'mac': base64Encode(box.mac.bytes),
+    };
+  }
+
+  /// Opens a sealed blob, or returns null when the secret is wrong (the GCM
+  /// tag fails to authenticate).
+  static Future<Map<String, dynamic>?> _open(
+      Map<String, dynamic> sealed, String secret, int iterations) async {
+    try {
+      final key = await _passwordKey(
+        secret,
+        base64Decode(sealed['salt'] as String),
+        iterations: iterations,
+      );
+      final clear = await AesGcm.with256bits().decrypt(
+        SecretBox(
+          base64Decode(sealed['cipher'] as String),
+          nonce: base64Decode(sealed['nonce'] as String),
+          mac: Mac(base64Decode(sealed['mac'] as String)),
+        ),
+        secretKey: key,
+      );
+      return jsonDecode(utf8.decode(clear)) as Map<String, dynamic>;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// A 120-bit recovery code, in groups of four so it can be read off a
+  /// piece of paper without losing your place. The alphabet leaves out the
+  /// characters people confuse (I, L, O, U).
+  static String newRecoveryCode() {
+    const alphabet = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
+    final rng = Random.secure();
+    final groups = List.generate(
+      6,
+      (_) => List.generate(4, (_) => alphabet[rng.nextInt(alphabet.length)])
+          .join(),
+    );
+    return groups.join('-');
+  }
+
+  /// Accepts a recovery code however it was typed back in.
+  static String normaliseRecoveryCode(String code) =>
+      code.toUpperCase().replaceAll(RegExp(r'[^0-9A-Z]'), '');
+
+  // ------------------------------------------------------------- lifecycle
+
+  /// Creates a new account and stores it encrypted under [password].
+  ///
+  /// A recovery code is generated at the same time and left in
+  /// [pendingRecoveryCode] for the caller to show once. Nothing else can
+  /// recover the account: the seeds exist only under the password and under
+  /// that code.
+  Future<PublicIdentity> create(String displayName, String password) async {
+    await _loadAccounts();
+    final xPair = await X25519().newKeyPair();
+    final edPair = await Ed25519().newKeyPair();
+
+    final seeds = jsonEncode({
+      'x': base64Encode(await xPair.extractPrivateKeyBytes()),
+      'ed': base64Encode(await edPair.extractPrivateKeyBytes()),
+    });
+
+    final recoveryCode = newRecoveryCode();
+    final xPub = base64Encode((await xPair.extractPublicKey()).bytes);
+    final account = StoredAccount(
+      id: xPub,
+      name: displayName,
+      x25519PublicKey: xPub,
+      ed25519PublicKey:
+          base64Encode((await edPair.extractPublicKey()).bytes),
+      vault: await _seal(seeds, password, _pbkdf2Iterations),
+      recovery: await _seal(
+          seeds, normaliseRecoveryCode(recoveryCode), _recoveryIterations),
+      // The very first account adopts the unsuffixed storage, so a device
+      // that only ever has one account keeps the simple layout.
+      legacy: _accounts.isEmpty,
     );
 
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(
-      _prefKey,
-      jsonEncode({
-        'name': displayName,
-        'salt': base64Encode(salt),
-        'nonce': base64Encode(box.nonce),
-        'cipher': base64Encode(box.cipherText),
-        'mac': base64Encode(box.mac.bytes),
-      }),
-    );
+    _accounts.removeWhere((a) => a.id == account.id);
+    _accounts.add(account);
+    await _saveAccounts();
+    await _activate(account.id);
 
     _x25519KeyPair = xPair;
     _ed25519KeyPair = edPair;
     _displayName = displayName;
+    pendingRecoveryCode = recoveryCode;
     return publicIdentity();
   }
 
-  /// Unlocks the stored identity with [password]. Returns false on a wrong
-  /// password (GCM authentication failure).
-  Future<bool> unlock(String password) async {
+  Future<void> _activate(String accountId) async {
+    _activeId = accountId;
+    _scope = _scopeFor(accountId);
     final prefs = await SharedPreferences.getInstance();
-    final stored = prefs.getString(_prefKey);
-    if (stored == null) return false;
-    final data = jsonDecode(stored) as Map<String, dynamic>;
-    final key = await _passwordKey(
-      password,
-      base64Decode(data['salt'] as String),
+    await prefs.setString(_activeKey, accountId);
+  }
+
+  /// Unlocks [accountId] (the active account by default) with [password].
+  /// Returns false on a wrong password.
+  Future<bool> unlock(String password, {String? accountId}) async {
+    await _loadAccounts();
+    final id = accountId ?? _activeId;
+    final account = _accounts.where((a) => a.id == id).firstOrNull;
+    if (account == null) return false;
+    final seeds = await _open(account.vault, password, _pbkdf2Iterations);
+    if (seeds == null) return false;
+    await _adopt(account, seeds);
+    return true;
+  }
+
+  /// Unlocks with the recovery code instead of the password — the way back
+  /// in when the password is gone. The caller should then set a new one
+  /// with [changePassword].
+  Future<bool> unlockWithRecoveryCode(String code, {String? accountId}) async {
+    await _loadAccounts();
+    final id = accountId ?? _activeId;
+    final account = _accounts.where((a) => a.id == id).firstOrNull;
+    if (account?.recovery == null) return false;
+    final seeds = await _open(
+      account!.recovery!,
+      normaliseRecoveryCode(code),
+      _recoveryIterations,
     );
-    final aes = AesGcm.with256bits();
-    try {
-      final clear = await aes.decrypt(
-        SecretBox(
-          base64Decode(data['cipher'] as String),
-          nonce: base64Decode(data['nonce'] as String),
-          mac: Mac(base64Decode(data['mac'] as String)),
-        ),
-        secretKey: key,
-      );
-      final seeds = jsonDecode(utf8.decode(clear)) as Map<String, dynamic>;
-      _x25519KeyPair =
-          await X25519().newKeyPairFromSeed(base64Decode(seeds['x'] as String));
-      _ed25519KeyPair = await Ed25519()
-          .newKeyPairFromSeed(base64Decode(seeds['ed'] as String));
-      _displayName = data['name'] as String;
-      return true;
-    } catch (_) {
-      return false;
+    if (seeds == null) return false;
+    await _adopt(account, seeds);
+    return true;
+  }
+
+  /// Loads the key pairs from decrypted [seeds] and makes [account] active,
+  /// filling in the public keys of a record migrated from the old build.
+  Future<void> _adopt(
+      StoredAccount account, Map<String, dynamic> seeds) async {
+    _x25519KeyPair =
+        await X25519().newKeyPairFromSeed(base64Decode(seeds['x'] as String));
+    _ed25519KeyPair =
+        await Ed25519().newKeyPairFromSeed(base64Decode(seeds['ed'] as String));
+    _displayName = account.name;
+    _storageKey = null;
+
+    if (!account.keysKnown) {
+      final xPub =
+          base64Encode((await _x25519KeyPair!.extractPublicKey()).bytes);
+      final edPub =
+          base64Encode((await _ed25519KeyPair!.extractPublicKey()).bytes);
+      final index = _accounts.indexWhere((a) => a.id == account.id);
+      if (index != -1) {
+        _accounts[index] = _accounts[index]
+            .copyWith(x25519PublicKey: xPub, ed25519PublicKey: edPub);
+        await _saveAccounts();
+      }
     }
+    await _activate(account.id);
+  }
+
+  /// Re-seals the unlocked account under a new password. The recovery code
+  /// is untouched: it protects the same seeds, not the password.
+  Future<bool> changePassword(String newPassword) async {
+    if (!isUnlocked) return false;
+    final index = _accounts.indexWhere((a) => a.id == _activeId);
+    if (index == -1) return false;
+    final seeds = jsonEncode({
+      'x': base64Encode(await _x25519KeyPair!.extractPrivateKeyBytes()),
+      'ed': base64Encode(await _ed25519KeyPair!.extractPrivateKeyBytes()),
+    });
+    _accounts[index] = _accounts[index]
+        .copyWith(vault: await _seal(seeds, newPassword, _pbkdf2Iterations));
+    await _saveAccounts();
+    return true;
+  }
+
+  /// Issues a fresh recovery code for the unlocked account, invalidating the
+  /// previous one. Left in [pendingRecoveryCode] for the caller to show.
+  Future<String?> regenerateRecoveryCode() async {
+    if (!isUnlocked) return null;
+    final index = _accounts.indexWhere((a) => a.id == _activeId);
+    if (index == -1) return null;
+    final seeds = jsonEncode({
+      'x': base64Encode(await _x25519KeyPair!.extractPrivateKeyBytes()),
+      'ed': base64Encode(await _ed25519KeyPair!.extractPrivateKeyBytes()),
+    });
+    final code = newRecoveryCode();
+    _accounts[index] = _accounts[index].copyWith(
+      recovery:
+          await _seal(seeds, normaliseRecoveryCode(code), _recoveryIterations),
+    );
+    await _saveAccounts();
+    pendingRecoveryCode = code;
+    return code;
+  }
+
+  /// Switches to another account. The caller unlocks it afterwards; until
+  /// then nothing is readable, because every stored chat is encrypted under
+  /// the key derived from that account's own seed.
+  Future<void> switchTo(String accountId) async {
+    await _loadAccounts();
+    if (!_accounts.any((a) => a.id == accountId)) return;
+    lock();
+    _displayName = null;
+    await _activate(accountId);
+  }
+
+  Future<void> renameAccount(String accountId, String name) async {
+    final index = _accounts.indexWhere((a) => a.id == accountId);
+    if (index == -1) return;
+    _accounts[index] = _accounts[index].copyWith(name: name);
+    if (accountId == _activeId) _displayName = name;
+    await _saveAccounts();
+  }
+
+  // -------------------------------------------------------------- transfer
+
+  /// Everything another device needs to hold this account: the same
+  /// ciphertext that is stored here, so the private seeds never exist in
+  /// the clear outside the app and the same password opens it there.
+  ///
+  /// The recovery blob is deliberately left out — a transfer is normally
+  /// shown as a QR code, and a code that also carried the recovery secret
+  /// would be worth photographing over your shoulder.
+  String? exportAccount(String accountId) {
+    final account = _accounts.where((a) => a.id == accountId).firstOrNull;
+    if (account == null) return null;
+    return base64Url.encode(utf8.encode(jsonEncode({
+      'v': 1,
+      'name': account.name,
+      'x25519': account.x25519PublicKey,
+      'ed25519': account.ed25519PublicKey,
+      'vault': account.vault,
+    })));
+  }
+
+  /// Takes in an account exported from another device.
+  ///
+  /// Returns the account's name on success. An account whose public key is
+  /// already held is refreshed rather than added a second time — the same
+  /// key is the same account, however many devices it reached this one from.
+  Future<String?> importAccount(String blob) async {
+    await _loadAccounts();
+    try {
+      final json = jsonDecode(utf8.decode(base64Url.decode(blob.trim())))
+          as Map<String, dynamic>;
+      final xPub = json['x25519'] as String? ?? '';
+      if (xPub.isEmpty) return null;
+      final account = StoredAccount(
+        id: xPub,
+        name: json['name'] as String? ?? 'Account',
+        x25519PublicKey: xPub,
+        ed25519PublicKey: json['ed25519'] as String? ?? '',
+        vault: (json['vault'] as Map).cast<String, dynamic>(),
+      );
+      final existing = _accounts.indexWhere((a) => a.id == account.id);
+      if (existing != -1) {
+        // Keep the recovery blob this device already has; the incoming copy
+        // never carries one.
+        _accounts[existing] = account.copyWith(
+          recovery: _accounts[existing].recovery,
+        );
+      } else {
+        _accounts.add(account);
+      }
+      await _saveAccounts();
+      return account.name;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Removes an account and everything stored under its scope. The keys are
+  /// gone for good unless they were exported first.
+  Future<void> deleteAccount(String accountId) async {
+    await _loadAccounts();
+    final account = _accounts.where((a) => a.id == accountId).firstOrNull;
+    if (account == null) return;
+    final scope = _scopeFor(accountId);
+    final otherScopes = _accounts
+        .where((a) => a.id != accountId)
+        .map((a) => _scopeFor(a.id))
+        .where((s) => s.isNotEmpty)
+        .toList();
+    final prefs = await SharedPreferences.getInstance();
+    for (final key in prefs.getKeys().toList()) {
+      final ours = key.startsWith('revamp.') || key == avatarPrefKey;
+      if (!ours && !key.startsWith('$avatarPrefKey.')) continue;
+      if (scope.isEmpty) {
+        // The unsuffixed account owns every key that no other account's
+        // suffix claims.
+        if (otherScopes.any(key.endsWith)) continue;
+      } else if (!key.endsWith(scope)) {
+        continue;
+      }
+      await prefs.remove(key);
+    }
+    _accounts.removeWhere((a) => a.id == accountId);
+    if (_activeId == accountId) {
+      lock();
+      _displayName = null;
+      await _activate(_accounts.isEmpty ? '' : _accounts.first.id);
+    }
+    await _saveAccounts();
   }
 
   void lock() {
@@ -287,19 +724,22 @@ class IdentityService {
     return _storageKey;
   }
 
+  /// Erases the account currently in use.
   Future<void> delete() async {
-    lock();
-    _displayName = null;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(_prefKey);
+    final id = _activeId;
+    if (id.isEmpty) return;
+    await deleteAccount(id);
   }
 
-  /// The profile picture advertised with this identity (base64 JPEG).
+  /// The profile picture advertised with this identity (base64 JPEG). Each
+  /// account has its own, so switching identity changes the face too.
   static const avatarPrefKey = 'profile.picture';
+
+  String get avatarKey => '$avatarPrefKey$scope';
 
   Future<String> _avatar() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getString(avatarPrefKey) ?? '';
+    return prefs.getString(avatarKey) ?? '';
   }
 
   /// The public, self-signed advertisement of this identity.
