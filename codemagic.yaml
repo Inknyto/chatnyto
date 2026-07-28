@@ -1,10 +1,10 @@
-# ~/Documents/git/chatnyto/codemagic.yaml 28 Jul 2026 at 02:24:01 PM
+# ~/Documents/git/chatnyto/codemagic.yaml 28 Jul 2026 at 02:25:39 PM
 workflows:
   ios-build-workflow:
     name: iOS Unsigned Build
     working_directory: flutter_app/chatnyto 
     max_build_duration: 60
-    instance_type: mac_mini_co2
+    instance_type: mac_mini_m2 # Fixed: Using the valid standard Apple Silicon M2 instance
     environment:
       flutter: stable
       xcode: latest
@@ -13,7 +13,7 @@ workflows:
       events:
         - push
       branch_patterns:
-        - target: revamp/whatsapp-ux
+        - pattern: 'revamp/whatsapp-ux' # Fixed: Replaced "target" with "pattern"
     scripts:
       - name: Fetch Flutter dependencies
         script: |
@@ -26,7 +26,6 @@ workflows:
           flutter build ios --release --no-codesign
       - name: Package into Payload Folder
         script: |
-          # Side-loading tools expect an .ipa container containing a 'Payload' folder
           mkdir -p build/ios/iphoneos/Payload
           cp -r build/ios/iphoneos/Runner.app build/ios/iphoneos/Payload/
           cd build/ios/iphoneos && zip -r unsigned_app.ipa Payload
