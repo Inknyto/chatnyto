@@ -56,6 +56,14 @@ dependencies:
   gal: ^2.3.3
   share_plus: ^13.3.0
   path_provider: ^2.1.6
+  # Microphone capture and raw playback for the relayed-call path, used when
+  # the two devices have no direct route to each other and the audio has to
+  # travel over MQTT like everything else does.
+  record: ^7.1.1
+  flutter_pcm_sound: ^3.3.3
+  # Picking a ringtone, and playing it while the app is in front.
+  file_selector: ^1.0.3
+  audioplayers: ^6.8.1
 
 # flutter_secure_storage 10.3.1 pins its Windows implementation to a build
 # that requires win32 5.x, which in turn drags quill_native_bridge_windows
@@ -64,6 +72,12 @@ dependencies:
 # the Windows target buildable.
 dependency_overrides:
   flutter_secure_storage_windows: ^4.2.2
+  # jni 1.0.1 and 1.0.2 ship C that this toolchain rejects — they pass a
+  # JNIEnv** where the JNI headers want a void**, which clang treats as an
+  # error rather than a warning. It arrives through path_provider_android,
+  # and jni_flutter builds it on Linux too, so the Linux desktop target
+  # stops compiling. 1.0.0 is the last version that builds.
+  jni: 1.0.0
 
 dev_dependencies:
   flutter_test:

@@ -15,7 +15,9 @@ import '../core/settings/wallpaper_picker.dart';
 import '../core/theme/theme_controller.dart';
 import '../core/widgets/connection_status.dart';
 import '../core/widgets/liquid_glass.dart';
+import '../core/widgets/person_avatar.dart';
 import '../core/widgets/wa_components.dart';
+import '../humans/contacts_page.dart';
 import '../humans/humans_page.dart';
 import '../l10n/app_localizations.dart';
 import '../robots/robots_page.dart';
@@ -67,6 +69,7 @@ class _HomeShellState extends State<HomeShell> {
               icon: const Icon(Icons.more_vert_rounded),
               onSelected: (choice) {
                 final page = switch (choice) {
+                  'contacts' => const ContactsPage(),
                   'settings' => const AccountPage(),
                   'security' => const SecurityPage(),
                   'brokers' => const BrokersPage(),
@@ -77,6 +80,8 @@ class _HomeShellState extends State<HomeShell> {
                 }
               },
               itemBuilder: (context) => [
+                const PopupMenuItem(
+                    value: 'contacts', child: Text('Contacts')),
                 PopupMenuItem(
                     value: 'settings', child: Text(l10n.menuSettings)),
                 PopupMenuItem(
@@ -400,6 +405,7 @@ class _ChatsTabState extends State<ChatsTab> {
                       : chat.lastMessage,
                   timeStamp: time,
                   unreadCount: chat.unread,
+                  lastStatus: chat.isDm ? chat.lastStatus : null,
                   leadingIcon: chat.isDm ? null : Icons.groups_rounded,
                   onTap: () => Navigator.push(
                     context,
@@ -472,6 +478,118 @@ class _PeopleTabState extends State<PeopleTab> {
     return (await IdentityService.instance.publicIdentity()).fingerprint;
   }
 
+  /// What can be done with the person in this row: keep them, rename them,
+  /// or stop keeping them.
+  void _contactOptions(PublicIdentity peer) {
+    final saved = _contacts.knows(peer.x25519PublicKey);
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) => LiquidGlass(
+        margin: const EdgeInsets.all(12),
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: PersonAvatar(
+                name: _contacts.displayName(peer),
+                avatar: peer.avatar,
+                radius: 20,
+              ),
+              title: Text(_contacts.displayName(peer)),
+              subtitle: Text(
+                peer.fingerprint,
+                style: const TextStyle(fontFamily: 'monospace', fontSize: 11),
+              ),
+            ),
+            const Divider(height: 1),
+            ListTile(
+              leading: const Icon(Icons.message_rounded),
+              title: Text(AppLocalizations.of(context).message),
+              onTap: () async {
+                Navigator.pop(sheetContext);
+                final chat = await ChatService.instance.startDm(peer);
+                if (!mounted) return;
+                Navigator.push(
+                    context, GlassPageRoute(page: RevampChatPage(chat: chat)));
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.drive_file_rename_outline_rounded),
+              title: const Text('Rename'),
+              subtitle: const Text('Only on this device'),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                _renameContact(peer);
+              },
+            ),
+            ListTile(
+              leading: Icon(
+                saved
+                    ? Icons.person_remove_rounded
+                    : Icons.person_add_alt_rounded,
+                color: saved ? Colors.redAccent : null,
+              ),
+              title: Text(saved ? 'Forget this contact' : 'Save as contact'),
+              onTap: () async {
+                Navigator.pop(sheetContext);
+                if (saved) {
+                  await _contacts.remove(peer.x25519PublicKey);
+                } else {
+                  await _contacts.add(peer);
+                }
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.contacts_rounded),
+              title: const Text('All contacts'),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                Navigator.push(
+                    context, GlassPageRoute(page: const ContactsPage()));
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _renameContact(PublicIdentity peer) async {
+    final controller = TextEditingController(
+        text: _contacts.hasAlias(peer.x25519PublicKey)
+            ? _contacts.displayName(peer)
+            : '');
+    final name = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text('Rename ${peer.name}'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: InputDecoration(
+            labelText: 'Your name for them',
+            helperText: 'Leave empty to use ${peer.name} again.',
+            helperMaxLines: 2,
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: Text(AppLocalizations.of(context).cancel),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, controller.text),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    if (name == null) return;
+    await _contacts.setAlias(peer.x25519PublicKey, name);
+  }
+
   void _showIdentity(PublicIdentity peer) {
     showModalBottomSheet(
       context: context,
@@ -482,13 +600,7 @@ class _PeopleTabState extends State<PeopleTab> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            CircleAvatar(
-              radius: 36,
-              child: Text(
-                peer.name.isEmpty ? '?' : peer.name[0].toUpperCase(),
-                style: const TextStyle(fontSize: 28),
-              ),
-            ),
+            PersonAvatar(name: peer.name, avatar: peer.avatar, radius: 36),
             const SizedBox(height: 12),
             Text(peer.name,
                 style: const TextStyle(
@@ -623,6 +735,9 @@ class _PeopleTabState extends State<PeopleTab> {
                       tooltip: 'Retry connections',
                       icon: const Icon(Icons.refresh_rounded),
                       onPressed: () async {
+                        // The user asking is reason enough to ignore any
+                        // backoff and try everything again now.
+                        _brokers.retryNow();
                         await _brokers.autoConnectAll();
                         await _brokers.advertiseEverywhere();
                       },
@@ -633,7 +748,7 @@ class _PeopleTabState extends State<PeopleTab> {
             ),
             for (final peer in peers)
               WaChatTile(
-                title: peer.name,
+                title: _contacts.displayName(peer),
                 subtitle: onAir.contains(peer.x25519PublicKey)
                     ? AppLocalizations.of(context)
                         .verifiedKey(peer.fingerprint)
@@ -641,6 +756,9 @@ class _PeopleTabState extends State<PeopleTab> {
                 leadingIcon: null,
                 avatar: peer.avatar,
                 onTap: () => _showIdentity(peer),
+                // Same gesture as the chat list: hold for what you can do
+                // with this row, rather than a menu hidden one level down.
+                onLongPress: () => _contactOptions(peer),
               ),
             if (peers.isEmpty)
               const Padding(
@@ -745,11 +863,14 @@ class _UpdatesTabState extends State<UpdatesTab> {
                                 ),
                               ),
                               padding: const EdgeInsets.all(3),
-                              child: CircleAvatar(
+                              // The tap belongs to the tile, which opens the
+                              // person's details — where the picture can be
+                              // opened properly.
+                              child: PersonAvatar(
+                                name: peer.name,
+                                avatar: peer.avatar,
                                 radius: 26,
-                                child: Text(peer.name.isEmpty
-                                    ? '?'
-                                    : peer.name[0].toUpperCase()),
+                                viewable: false,
                               ),
                             ),
                             const SizedBox(height: 4),

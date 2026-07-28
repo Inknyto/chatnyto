@@ -82,10 +82,23 @@ class BackgroundService {
     );
   }
 
-  /// Starts the service if the user wants it. Safe to call repeatedly.
+  /// Starts the service if the user wants it. Safe to call repeatedly, and
+  /// worth calling again whenever the app comes back to the front: the
+  /// service is the thing that keeps the process alive, so if the system
+  /// took it away, that is exactly the moment to put it back.
   Future<void> startIfEnabled() async {
     if (!_supported || !await enabled()) return;
     await start();
+  }
+
+  /// Whether the process is currently being held open.
+  Future<bool> running() async {
+    if (!_supported) return false;
+    try {
+      return await FlutterForegroundTask.isRunningService;
+    } catch (_) {
+      return false;
+    }
   }
 
   Future<void> start() async {
@@ -96,12 +109,50 @@ class BackgroundService {
       await FlutterForegroundTask.requestNotificationPermission();
       await FlutterForegroundTask.startService(
         notificationTitle: 'ChatNyto is connected',
-        notificationText: 'Messages arrive even while the app is closed.',
+        notificationText: 'Messages and calls arrive while the app is closed.',
         callback: startBackgroundService,
       );
     } catch (error) {
       // A refused permission or an OEM restriction must not break the app.
       debugPrint('Could not start the background service: $error');
+    }
+  }
+
+  /// Whether Android has agreed to leave this app alone.
+  ///
+  /// A foreground service is supposed to keep the process alive, and on
+  /// stock Android it does. Manufacturers layer their own battery saving on
+  /// top of it, and that layer will kill a backgrounded app regardless —
+  /// which is why a messenger can look as though it "forgot" its networks
+  /// after being closed for a while. Being on the exemption list is what
+  /// actually settles it.
+  Future<bool> unrestricted() async {
+    if (!Platform.isAndroid) return true;
+    try {
+      return await FlutterForegroundTask.isIgnoringBatteryOptimizations;
+    } catch (_) {
+      return true;
+    }
+  }
+
+  /// Asks for that exemption. The system shows the prompt; if the phone
+  /// refuses to show one, the settings page is opened instead so there is
+  /// always a way through.
+  Future<bool> requestUnrestricted() async {
+    if (!Platform.isAndroid) return true;
+    try {
+      if (await FlutterForegroundTask.isIgnoringBatteryOptimizations) {
+        return true;
+      }
+      await FlutterForegroundTask.requestIgnoreBatteryOptimization();
+      if (await FlutterForegroundTask.isIgnoringBatteryOptimizations) {
+        return true;
+      }
+      await FlutterForegroundTask.openIgnoreBatteryOptimizationSettings();
+      return FlutterForegroundTask.isIgnoringBatteryOptimizations;
+    } catch (error) {
+      debugPrint('Could not ask for the battery exemption: $error');
+      return false;
     }
   }
 

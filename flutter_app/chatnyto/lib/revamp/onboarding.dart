@@ -2,11 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/brokers/broker_service.dart';
+import '../calls/call_service.dart';
+import '../core/crypto/contact_book.dart';
 import '../core/crypto/crypto_service.dart';
 import '../core/crypto/password_vault.dart';
 import '../core/notifications/background_service.dart';
 import '../core/notifications/notification_service.dart';
 import '../core/widgets/liquid_glass.dart';
+import '../core/widgets/person_avatar.dart';
 import '../account/recovery_pages.dart';
 import '../l10n/app_localizations.dart';
 import 'chat_service.dart';
@@ -128,7 +131,8 @@ class _SetupScreenState extends State<SetupScreen> {
     final recoveryCode = IdentityService.instance.pendingRecoveryCode;
     IdentityService.instance.pendingRecoveryCode = null;
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('profile.name', name);
+    await prefs.setString(
+        IdentityService.instance.scoped('profile.name'), name);
     // Remembered by default so the app opens straight into the chats; the
     // user can switch to being asked every time in the settings.
     await PasswordVault.instance.remember(password);
@@ -268,7 +272,7 @@ class _UnlockScreenState extends State<UnlockScreen> {
   /// Makes another account the one this screen unlocks.
   Future<void> _switchTo(StoredAccount account) async {
     await IdentityService.instance.switchTo(account.id);
-    ChatService.instance.reset();
+    forgetAccountState();
     _passwordController.clear();
     if (!mounted) return;
     setState(() {
@@ -407,13 +411,14 @@ class _UnlockScreenState extends State<UnlockScreen> {
                       margin: const EdgeInsets.symmetric(vertical: 4),
                       child: ListTile(
                         dense: true,
-                        leading: CircleAvatar(
-                          radius: 16,
-                          child: Text(
-                            account.name.isEmpty
-                                ? '?'
-                                : account.name[0].toUpperCase(),
-                            style: const TextStyle(fontSize: 13),
+                        leading: FutureBuilder<String>(
+                          future: IdentityService.instance
+                              .avatarOf(account.id),
+                          builder: (context, snapshot) => PersonAvatar(
+                            name: account.name,
+                            avatar: snapshot.data,
+                            radius: 16,
+                            viewable: false,
                           ),
                         ),
                         title: Text(account.name),
@@ -438,6 +443,8 @@ Future<void> _startServices() async {
   await BackgroundService.instance.startIfEnabled();
   await BrokerService.instance.ensureDefaults();
   await ChatService.instance.init();
+  await ContactBook.instance.load();
+  await CallService.instance.init();
   // Fire and forget: connect whatever network is reachable.
   BrokerService.instance.autoConnectAll().then(
         (_) => BrokerService.instance.advertiseEverywhere(),
@@ -446,3 +453,20 @@ Future<void> _startServices() async {
 
 /// Public wrapper used at app start for the already-onboarded path.
 Future<void> startRevampServices() => _startServices();
+
+/// Everything one account holds, dropped before another one opens.
+///
+/// Each of these keeps its data under a key that includes the account's
+/// scope, so the storage was already separate — but each also keeps a copy
+/// in memory, and that copy is what the screen shows. Without this, opening
+/// a second identity showed the first one's chats, contacts and calls until
+/// the app was restarted: separate on disk, shared on screen.
+///
+/// Networks are deliberately not in this list. A broker is a property of
+/// the place the device is, not of who is using it, and its sign-in lives in
+/// the keystore under the network's name.
+void forgetAccountState() {
+  ChatService.instance.reset();
+  ContactBook.instance.reset();
+  CallService.instance.reset();
+}

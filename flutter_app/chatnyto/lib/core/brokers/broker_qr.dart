@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:qr_flutter/qr_flutter.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../widgets/liquid_glass.dart';
 import 'broker_credentials.dart';
@@ -36,9 +38,9 @@ class BrokerQr {
       final host = uri.queryParameters['host'];
       if (host == null || host.isEmpty) return null;
       return Broker(
-        name: uri.queryParameters['name']?.trim().isNotEmpty == true
-            ? uri.queryParameters['name']!.trim()
-            : 'Network at $host',
+        // Left empty when the code carries no name, so a published network
+        // can still introduce itself by its own.
+        name: uri.queryParameters['name']?.trim() ?? '',
         host: host,
         port: int.tryParse(uri.queryParameters['port'] ?? '') ?? 1883,
         username: uri.queryParameters['user'] ?? '',
@@ -153,9 +155,41 @@ class _BrokerQrPageState extends State<BrokerQrPage> {
                     _includeSignIn
                         ? 'This code carries the password — only show it to '
                             'people you want on the network.'
-                        : 'Anyone who scans this reaches the same network.',
+                        : 'Anyone who scans this reaches the same network. If '
+                            'it needs a sign-in, their app asks the server '
+                            'for one, so you never hand a password over.',
                     textAlign: TextAlign.center,
                     style: const TextStyle(fontSize: 12),
+                  ),
+                  const SizedBox(height: 12),
+                  // Not everyone is in the room. The same payload is a link,
+                  // so it can be sent to somebody who is not.
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      TextButton.icon(
+                        onPressed: () => SharePlus.instance.share(
+                          ShareParams(
+                            text: payload,
+                            subject: 'Join ${broker.name} on ChatNyto',
+                          ),
+                        ),
+                        icon: const Icon(Icons.ios_share_rounded, size: 18),
+                        label: const Text('Share link'),
+                      ),
+                      TextButton.icon(
+                        onPressed: () async {
+                          await Clipboard.setData(
+                              ClipboardData(text: payload));
+                          if (!context.mounted) return;
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Link copied.')),
+                          );
+                        },
+                        icon: const Icon(Icons.copy_rounded, size: 18),
+                        label: const Text('Copy'),
+                      ),
+                    ],
                   ),
                 ],
               ),

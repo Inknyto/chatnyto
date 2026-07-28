@@ -294,6 +294,11 @@ class IdentityService {
   /// and profile picture stay exactly where they are.
   String get scope => _scope;
 
+  /// A preferences key that belongs to the account in use. The first
+  /// account on a device has an empty scope, so its keys keep the names
+  /// earlier builds gave them and its data stays where it is.
+  String scoped(String key) => '$key$scope';
+
   /// The recovery code produced by the last [create] or
   /// [regenerateRecoveryCode]. Held only until the UI has shown it — it is
   /// never written down anywhere by the app, because a copy on the device
@@ -682,10 +687,19 @@ class IdentityService {
         .map((a) => _scopeFor(a.id))
         .where((s) => s.isNotEmpty)
         .toList();
+    // Everything an account owns lives under one of these, suffixed with
+    // its scope: chats and outbox, contacts, call history, profile fields
+    // and the picture.
+    const owned = [
+      'revamp.',
+      'contacts.v1',
+      'calls.history.v1',
+      'profile.',
+      avatarPrefKey,
+    ];
     final prefs = await SharedPreferences.getInstance();
     for (final key in prefs.getKeys().toList()) {
-      final ours = key.startsWith('revamp.') || key == avatarPrefKey;
-      if (!ours && !key.startsWith('$avatarPrefKey.')) continue;
+      if (!owned.any(key.startsWith)) continue;
       if (scope.isEmpty) {
         // The unsuffixed account owns every key that no other account's
         // suffix claims.
@@ -740,6 +754,15 @@ class IdentityService {
   Future<String> _avatar() async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getString(avatarKey) ?? '';
+  }
+
+  /// The picture of an account that is not the active one — for the account
+  /// list and the unlock screen, which show accounts that are still locked.
+  /// The picture is not a secret: it is published with the identity.
+  Future<String> avatarOf(String accountId) async {
+    await _loadAccounts();
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString('$avatarPrefKey${_scopeFor(accountId)}') ?? '';
   }
 
   /// The public, self-signed advertisement of this identity.

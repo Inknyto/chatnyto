@@ -63,6 +63,24 @@ write_profile() {
   : "${APP_USER:?Set APP_USER in $ENV_FILE (an account from MQTT_USERS)}"
   : "${APP_PASSWORD:?Set APP_PASSWORD in $ENV_FILE}"
 
+  # The call servers, when this deployment runs one. Without them two people
+  # on mobile data can message each other but not call: neither phone has an
+  # address the other can reach. Published here rather than built into the
+  # app, so the app keeps needing nothing but the domain.
+  local ice="[]"
+  if [ -n "${TURN_USER:-}" ] && [ -n "${TURN_PASSWORD:-}" ]; then
+    ice=$(cat <<ICE
+[
+    {"urls": "stun:${PUBLIC_HOST}:3478"},
+    {"urls": "turn:${PUBLIC_HOST}:3478?transport=udp",
+     "username": "${TURN_USER}", "credential": "${TURN_PASSWORD}"},
+    {"urls": "turn:${PUBLIC_HOST}:3478?transport=tcp",
+     "username": "${TURN_USER}", "credential": "${TURN_PASSWORD}"}
+  ]
+ICE
+    )
+  fi
+
   mkdir -p deploy/wellknown
   local out="deploy/wellknown/chatnyto.json"
   cat > "$out" <<JSON
@@ -70,11 +88,13 @@ write_profile() {
   "name": "${PUBLIC_NAME:-$PUBLIC_HOST}",
   "url": "wss://${PUBLIC_HOST}/mqtt",
   "username": "${APP_USER}",
-  "password": "${APP_PASSWORD}"
+  "password": "${APP_PASSWORD}",
+  "ice": ${ice}
 }
 JSON
   chmod 644 "$out"
   echo "==> Wrote $out (wss://${PUBLIC_HOST}/mqtt as ${APP_USER})"
+  [ "$ice" = "[]" ] || echo "==> Published turn:${PUBLIC_HOST}:3478 for calls"
 }
 
 echo "==> Writing broker accounts"
@@ -85,6 +105,12 @@ write_profile
 [ "$TARGET" = "users" ] && { "${COMPOSE[@]}" restart mqtt; exit 0; }
 
 echo "==> Starting the broker and the tunnel"
+# The TURN server only joins in when the env file asks for it — it is the one
+# piece that needs open ports rather than the tunnel.
+if [ -n "${TURN_USER:-}" ] && [ -n "${TURN_PASSWORD:-}" ]; then
+  : "${TURN_PUBLIC_IP:?Set TURN_PUBLIC_IP in $ENV_FILE (the server's public IP)}"
+  COMPOSE+=(--profile turn)
+fi
 "${COMPOSE[@]}" up -d --remove-orphans
 
 echo "==> Waiting for the broker to answer"

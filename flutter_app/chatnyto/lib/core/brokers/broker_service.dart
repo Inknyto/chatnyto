@@ -27,6 +27,7 @@ class Broker {
     this.username = '',
     this.password = '',
     this.autoConnect = true,
+    this.lastConnectedAt = 0,
   });
 
   final String name;
@@ -40,13 +41,19 @@ class Broker {
   /// off in the UI clears this, so connection state survives restarts.
   final bool autoConnect;
 
-  Broker copyWith({bool? autoConnect}) => Broker(
+  /// When this broker last accepted a connection, so the networks list can
+  /// put the ones actually in use at the top instead of in the order they
+  /// happened to be added.
+  final int lastConnectedAt;
+
+  Broker copyWith({bool? autoConnect, int? lastConnectedAt}) => Broker(
         name: name,
         host: host,
         port: port,
         username: username,
         password: password,
         autoConnect: autoConnect ?? this.autoConnect,
+        lastConnectedAt: lastConnectedAt ?? this.lastConnectedAt,
       );
 
   Map<String, dynamic> toJson() => {
@@ -54,6 +61,7 @@ class Broker {
         'host': host,
         'port': port,
         'auto': autoConnect,
+        'seen': lastConnectedAt,
       };
 
   /// `user`/`pass` are only still read here to pick up brokers saved by an
@@ -66,6 +74,7 @@ class Broker {
         username: json['user'] as String? ?? '',
         password: json['pass'] as String? ?? '',
         autoConnect: json['auto'] as bool? ?? true,
+        lastConnectedAt: (json['seen'] as num?)?.toInt() ?? 0,
       );
 
   bool get hasLegacyCredentials => username.isNotEmpty || password.isNotEmpty;
@@ -142,6 +151,21 @@ class _BrokerAddress {
   }
 }
 
+/// A message being reassembled from the pieces it was published in.
+class _PartialMessage {
+  _PartialMessage(this.total) : startedAt = DateTime.now();
+
+  final int total;
+  final DateTime startedAt;
+  final Map<int, String> pieces = {};
+
+  int get bytes =>
+      pieces.values.fold<int>(0, (sum, piece) => sum + piece.length);
+
+  bool get expired =>
+      DateTime.now().difference(startedAt) > BrokerService._chunkTimeout;
+}
+
 /// An MQTT broker found by scanning the network the device is on.
 class DiscoveredBroker {
   DiscoveredBroker({required this.host, required this.port});
@@ -196,6 +220,15 @@ class BrokerService extends ChangeNotifier {
   bool _loaded = false;
   Timer? _heartbeat;
 
+  /// Guards against a second sweep starting while one is still running —
+  /// the heartbeat, the lifecycle callback and the UI can all ask at once.
+  bool _connecting = false;
+
+  /// When a broker that failed may be tried again, and how long the wait is
+  /// up to now. Keyed by broker name.
+  final Map<String, DateTime> _retryAfter = {};
+  final Map<String, Duration> _backoff = {};
+
   /// Invoked for every message arriving on `chatnyto/chat/#` of any
   /// connected broker. Set by the chat messenger.
   void Function(String topic, String payload)? onChatMessage;
@@ -210,7 +243,18 @@ class BrokerService extends ChangeNotifier {
     return list;
   }
 
-  List<Broker> get brokers => List.unmodifiable(_brokers);
+  /// Newest first: what is connected now, then whatever was connected most
+  /// recently. A network someone used yesterday is far more likely to be
+  /// the one they want than the one they added first and never opened.
+  List<Broker> get brokers {
+    final sorted = List<Broker>.from(_brokers)
+      ..sort((a, b) {
+        final live = (isConnected(b) ? 1 : 0) - (isConnected(a) ? 1 : 0);
+        if (live != 0) return live;
+        return b.lastConnectedAt.compareTo(a.lastConnectedAt);
+      });
+    return List.unmodifiable(sorted);
+  }
   List<PublicIdentity> get peers => List.unmodifiable(_peers.values);
 
   /// Which network a peer was last heard on, empty when unknown.
@@ -318,6 +362,24 @@ class BrokerService extends ChangeNotifier {
   /// reverse proxy or a tunnel is reached.
   Future<bool> connect(Broker broker) async {
     if (isConnected(broker)) return true;
+    // The heartbeat, the lifecycle callback and the switch in the UI can all
+    // ask for the same broker at once. Without this they each open their own
+    // client: the last one wins the slot in [_clients] and the others stay
+    // connected but unreachable, delivering every message a second time.
+    final inFlight = _inFlight[broker.name];
+    if (inFlight != null) return inFlight;
+    final attempt = _connectOnce(broker);
+    _inFlight[broker.name] = attempt;
+    try {
+      return await attempt;
+    } finally {
+      _inFlight.remove(broker.name);
+    }
+  }
+
+  final Map<String, Future<bool>> _inFlight = {};
+
+  Future<bool> _connectOnce(Broker broker) async {
     final clientId =
         'chatnyto-${DateTime.now().millisecondsSinceEpoch % 1000000}';
     final address = _BrokerAddress.parse(broker);
@@ -325,7 +387,16 @@ class BrokerService extends ChangeNotifier {
     final client =
         MqttServerClient.withPort(address.server, clientId, address.port)
           ..keepAlivePeriod = 30
-          ..autoReconnect = true;
+          // Long enough for a slow mobile link, short enough that a host
+          // which is not there admits it before the user gives up.
+          ..connectTimeoutPeriod = 5000
+          // Deliberately off. mqtt_client's own reconnection keeps working
+          // at a client that never connected in the first place, and a
+          // handful of those grinding away in the background is what makes
+          // the app stop responding. Retrying is [autoConnectAll]'s job:
+          // it knows which networks the user actually wants, and it backs
+          // off the ones that are not there.
+          ..autoReconnect = false;
 
     if (address.webSocket) {
       client.useWebSocket = true;
@@ -334,7 +405,14 @@ class BrokerService extends ChangeNotifier {
       client.secure = true;
     }
 
-    client.onDisconnected = notifyListeners;
+    // A dropped connection leaves nothing behind: the next sweep makes a
+    // fresh client rather than reviving one whose handler has given up.
+    client.onDisconnected = () {
+      if (identical(_clients[broker.name], client)) {
+        _clients.remove(broker.name);
+      }
+      notifyListeners();
+    };
     // The sign-in is fetched from the keystore at the moment of connecting;
     // it is never held on the Broker the UI is showing.
     final sign = await BrokerCredentials.instance.read(broker.name);
@@ -365,8 +443,13 @@ class BrokerService extends ChangeNotifier {
         if (payload is! MqttPublishMessage) continue;
         if (event.topic.startsWith(chatTopicPrefix)) {
           try {
-            onChatMessage?.call(
-                event.topic, utf8.decode(payload.payload.message));
+            final text = utf8.decode(payload.payload.message);
+            // A piece of a larger message is put back together here, so
+            // nothing above this line ever has to know a message was split.
+            final whole = text.startsWith('{"chunk"')
+                ? _collectChunk(jsonDecode(text) as Map<String, dynamic>)
+                : text;
+            if (whole != null) onChatMessage?.call(event.topic, whole);
           } catch (_) {
             // Ignore undecodable chat payloads.
           }
@@ -397,9 +480,23 @@ class BrokerService extends ChangeNotifier {
     client.subscribe('$chatTopicPrefix/#', MqttQos.atLeastOnce);
     client.subscribe('$groupsTopicPrefix/#', MqttQos.atLeastOnce);
 
+    await _markConnected(broker);
     await advertiseIdentity(broker);
     notifyListeners();
     return true;
+  }
+
+  /// Notes that [broker] just worked: it moves to the top of the networks
+  /// list, and connecting to it counts as wanting it connected — so a
+  /// network only ever goes quiet because its switch was turned off.
+  Future<void> _markConnected(Broker broker) async {
+    final index = _brokers.indexWhere((b) => b.name == broker.name);
+    if (index == -1) return;
+    _brokers[index] = _brokers[index].copyWith(
+      autoConnect: true,
+      lastConnectedAt: DateTime.now().millisecondsSinceEpoch,
+    );
+    await _save();
   }
 
   /// Tracks the public groups announced on `chatnyto/groups/<slug>`. An
@@ -482,7 +579,18 @@ class BrokerService extends ChangeNotifier {
   /// Publishes [payload] on [topic] over every connected broker — the
   /// caller never needs to know which broker carries the message. Set
   /// [retain] for announcements that late joiners must still receive.
+  ///
+  /// Anything larger than a single [_chunkBytes] slice is split up first;
+  /// see [_publishInPieces] for why.
   void publishToAll(String topic, String payload, {bool retain = false}) {
+    if (payload.length > _chunkBytes && !retain) {
+      unawaited(_publishInPieces(topic, payload));
+      return;
+    }
+    _publishOnce(topic, payload, retain: retain);
+  }
+
+  void _publishOnce(String topic, String payload, {bool retain = false}) {
     final builder = MqttClientPayloadBuilder()..addString(payload);
     for (final client in _clients.values) {
       if (client.connectionStatus?.state == MqttConnectionState.connected) {
@@ -492,7 +600,145 @@ class BrokerService extends ChangeNotifier {
     }
   }
 
+  // -------------------------------------------------------------- chunking
+
+  /// How much of a message goes in one MQTT packet.
+  ///
+  /// A message is published to every connected broker at once, so it has to
+  /// fit the smallest of them. The ESP32 broker on the LoRa box grows its
+  /// receive buffer 512 bytes at a time out of a heap of a couple of hundred
+  /// kilobytes, and a photo — a hundred kilobytes of base64 inside an
+  /// encrypted envelope — simply cannot land there: the allocation fails and
+  /// the connection is dropped. That is why images worked on mosquitto and
+  /// vanished on the LoRa box.
+  ///
+  /// Two kilobytes leaves room for the topic and the wrapper while staying
+  /// well inside what a small broker can hold for each of its subscribers.
+  static const _chunkBytes = 2048;
+
+  /// Long enough for the rest of a picture to arrive over a slow link,
+  /// short enough that an abandoned half-message is not kept for ever.
+  static const _chunkTimeout = Duration(seconds: 90);
+
+  /// A ceiling on what unfinished messages may hold, so a peer that sends
+  /// chunk 1 of 10000 and disappears cannot fill this device's memory.
+  static const _chunkBufferLimit = 4 * 1024 * 1024;
+
+  var _chunkCounter = 0;
+  final Map<String, _PartialMessage> _partials = {};
+
+  /// Sends [payload] as numbered pieces, with a breath between them: the
+  /// small broker this exists for has one buffer per subscriber, and
+  /// seventy packets pushed back to back overrun it just as surely as one
+  /// large one did.
+  Future<void> _publishInPieces(String topic, String payload) async {
+    final id = '${DateTime.now().millisecondsSinceEpoch.toRadixString(36)}'
+        '-${(_chunkCounter++ & 0xffff).toRadixString(36)}';
+    final total = (payload.length + _chunkBytes - 1) ~/ _chunkBytes;
+    for (var index = 0; index < total; index++) {
+      final start = index * _chunkBytes;
+      final end = start + _chunkBytes;
+      _publishOnce(
+        topic,
+        jsonEncode({
+          'chunk': id,
+          'i': index,
+          'n': total,
+          'd': payload.substring(
+              start, end > payload.length ? payload.length : end),
+        }),
+      );
+      if (index + 1 < total) {
+        await Future<void>.delayed(const Duration(milliseconds: 12));
+      }
+    }
+  }
+
+  /// Collects a piece. Returns the whole message once the last one lands,
+  /// and null while there is still something missing.
+  @visibleForTesting
+  String? collectChunk(Map<String, dynamic> json) => _collectChunk(json);
+
+  /// How the pieces of [payload] look on the wire, in order.
+  @visibleForTesting
+  static List<Map<String, dynamic>> chunksFor(String payload, String id) {
+    final total = (payload.length + _chunkBytes - 1) ~/ _chunkBytes;
+    return [
+      for (var index = 0; index < total; index++)
+        {
+          'chunk': id,
+          'i': index,
+          'n': total,
+          'd': payload.substring(
+            index * _chunkBytes,
+            ((index + 1) * _chunkBytes).clamp(0, payload.length),
+          ),
+        },
+    ];
+  }
+
+  String? _collectChunk(Map<String, dynamic> json) {
+    final id = json['chunk'] as String?;
+    final index = (json['i'] as num?)?.toInt();
+    final total = (json['n'] as num?)?.toInt();
+    final data = json['d'] as String?;
+    if (id == null || index == null || total == null || data == null) {
+      return null;
+    }
+    if (total <= 0 || index < 0 || index >= total) return null;
+
+    _partials.removeWhere((_, partial) => partial.expired);
+    var buffered = _partials.values.fold<int>(0, (sum, p) => sum + p.bytes);
+    if (buffered > _chunkBufferLimit) {
+      // Drop the oldest rather than this one: whatever is filling memory is
+      // more likely the abandoned message than the one still arriving.
+      final oldest = _partials.entries.toList()
+        ..sort((a, b) => a.value.startedAt.compareTo(b.value.startedAt));
+      for (final entry in oldest) {
+        if (buffered <= _chunkBufferLimit) break;
+        buffered -= entry.value.bytes;
+        _partials.remove(entry.key);
+      }
+    }
+
+    final partial = _partials.putIfAbsent(id, () => _PartialMessage(total));
+    if (partial.total != total) return null;
+    partial.pieces[index] = data;
+    if (partial.pieces.length < total) return null;
+    _partials.remove(id);
+    return [for (var i = 0; i < total; i++) partial.pieces[i]!].join();
+  }
+
   bool get anyConnected => _brokers.any(isConnected);
+
+  /// True when at least one connected broker lives outside this network —
+  /// which is to say, the device already has a working route to the
+  /// internet. Calls use it to decide whether reaching a public STUN server
+  /// is worth trying; offline, the app still makes no outside connection.
+  bool get hasInternetNetwork =>
+      _brokers.where(isConnected).any((b) => !_isLocalAddress(b.host));
+
+  /// Recognises the addresses that can only mean "somewhere on this
+  /// network": loopback, the private IPv4 ranges, link-local, and the
+  /// hostnames a LAN hands out.
+  static bool _isLocalAddress(String host) {
+    var name = host.trim().toLowerCase();
+    final scheme = name.indexOf('://');
+    if (scheme != -1) name = name.substring(scheme + 3);
+    name = name.split('/').first.split(':').first;
+    if (name.isEmpty || name == 'localhost') return true;
+    if (name.endsWith('.local') || !name.contains('.')) return true;
+    final parts = name.split('.');
+    if (parts.length != 4 || parts.any((p) => int.tryParse(p) == null)) {
+      return false;
+    }
+    final octets = parts.map(int.parse).toList();
+    if (octets[0] == 127 || octets[0] == 10) return true;
+    if (octets[0] == 192 && octets[1] == 168) return true;
+    if (octets[0] == 172 && octets[1] >= 16 && octets[1] <= 31) return true;
+    if (octets[0] == 169 && octets[1] == 254) return true;
+    return false;
+  }
 
   /// First-run defaults so non-technical users never configure brokers:
   /// the Heltec LoRa broker's access-point address and this device.
@@ -506,14 +752,78 @@ class BrokerService extends ChangeNotifier {
   /// Tries to connect every registered broker the user hasn't switched off;
   /// failures are silent so the app keeps working with whichever network is
   /// reachable.
+  /// A few at a time, and never the ones that just failed.
+  ///
+  /// One after another is too slow: a broker that is not there takes the
+  /// full connect timeout to say so, and a list of them is half a minute
+  /// during which the network that *is* reachable stays unconnected and the
+  /// app looks broken on startup.
+  ///
+  /// All at once is worse. Every unreachable host means a DNS lookup and a
+  /// socket that sits there until it times out, and a device that has
+  /// collected a dozen networks over the months will stall its own interface
+  /// trying them simultaneously — which is an app that freezes on launch.
+  /// Three at a time, with a pause between batches, keeps both problems
+  /// small.
+  static const _connectBatch = 3;
+
   Future<void> autoConnectAll() async {
+    if (_connecting) return;
     await load();
     if (!await autoConnectEnabled()) return;
-    for (final broker in List<Broker>.from(_brokers)) {
-      if (broker.autoConnect && !isConnected(broker)) {
-        await connect(broker);
+    final now = DateTime.now();
+    final wanted = _brokers
+        .where((b) =>
+            b.autoConnect &&
+            !isConnected(b) &&
+            !(_retryAfter[b.name]?.isAfter(now) ?? false))
+        .toList(growable: false);
+    if (wanted.isEmpty) return;
+
+    _connecting = true;
+    try {
+      for (var start = 0; start < wanted.length; start += _connectBatch) {
+        final batch = wanted.skip(start).take(_connectBatch);
+        await Future.wait(batch.map((broker) async {
+          try {
+            if (await connect(broker)) {
+              _retryAfter.remove(broker.name);
+              _backoff.remove(broker.name);
+            } else {
+              _noteFailure(broker);
+            }
+          } catch (error) {
+            debugPrint('Could not connect ${broker.name}: $error');
+            _noteFailure(broker);
+          }
+        }));
+        // Somewhere for the rest of the app to get a word in.
+        await Future<void>.delayed(const Duration(milliseconds: 50));
       }
+    } finally {
+      _connecting = false;
     }
+  }
+
+  /// Backs a failed broker off, so a network that is simply not here stops
+  /// being retried every thirty seconds for the rest of the day.
+  void _noteFailure(Broker broker) {
+    final previous = _backoff[broker.name] ?? Duration.zero;
+    final next = previous == Duration.zero
+        ? const Duration(seconds: 60)
+        : (previous * 2);
+    final capped = next > const Duration(minutes: 10)
+        ? const Duration(minutes: 10)
+        : next;
+    _backoff[broker.name] = capped;
+    _retryAfter[broker.name] = DateTime.now().add(capped);
+  }
+
+  /// Clears the backoff for every network — used when something changed
+  /// that makes a retry worth it now, like coming back to the foreground.
+  void retryNow() {
+    _retryAfter.clear();
+    _backoff.clear();
   }
 
   // ------------------------------------------------------------- discovery

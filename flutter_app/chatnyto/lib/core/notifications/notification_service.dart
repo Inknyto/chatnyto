@@ -1,9 +1,12 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+import 'ringtones.dart';
 
 /// System notifications for messages that arrive while the app is in the
 /// background or while another chat is open.
@@ -160,12 +163,19 @@ class NotificationService {
     final body = sender.isEmpty || sender == chatTitle
         ? preview
         : '$sender: $preview';
+    // A tone of the user's own is played by the app: Android fixes a
+    // channel's sound when the channel is made, and cannot read a file that
+    // belongs to us. The notification itself then goes out silently, so the
+    // message is not announced twice.
+    await Ringtones.instance.load();
+    final own = Ringtones.instance.hasMessageTone;
+    if (own) unawaited(Ringtones.instance.playMessageTone());
     try {
       await _plugin.show(
         _nextId++,
         chatTitle,
         body,
-        _detailsFor(await sound()),
+        _detailsFor(own ? NotificationSound.silent : await sound()),
         payload: chatId,
       );
     } catch (error) {
@@ -197,6 +207,11 @@ class NotificationService {
   Future<void> showIncomingCall(String caller) async {
     await init();
     if (!_available) return;
+    // Same reasoning as for messages: a ringtone of the user's own is played
+    // by the app, and the notification then only vibrates and shows.
+    await Ringtones.instance.load();
+    final own = Ringtones.instance.hasCallTone;
+    if (own) unawaited(Ringtones.instance.startRinging());
     try {
       await _plugin.show(
         _callNotificationId,
@@ -204,8 +219,8 @@ class NotificationService {
         'ChatNyto voice call',
         NotificationDetails(
           android: AndroidNotificationDetails(
-            'chatnyto_calls',
-            'Calls',
+            own ? 'chatnyto_calls_silent' : 'chatnyto_calls',
+            own ? 'Calls (own ringtone)' : 'Calls',
             channelDescription: 'Incoming voice calls',
             importance: Importance.max,
             priority: Priority.max,
@@ -215,6 +230,7 @@ class NotificationService {
             // Stays up, and keeps sounding, until the call is dealt with.
             ongoing: true,
             autoCancel: false,
+            playSound: !own,
             audioAttributesUsage: AudioAttributesUsage.notificationRingtone,
             vibrationPattern:
                 Int64List.fromList(<int>[0, 700, 600, 700, 600, 700]),
@@ -243,6 +259,7 @@ class NotificationService {
 
   /// Stops the ringing, whatever ended the call.
   Future<void> cancelIncomingCall() async {
+    await Ringtones.instance.stopRinging();
     if (!_available) return;
     try {
       await _plugin.cancel(_callNotificationId);

@@ -21,22 +21,88 @@ class ContactBook extends ChangeNotifier {
   static final ContactBook instance = ContactBook._();
 
   static const _prefKey = 'contacts.v1';
+  static const _sharedPrefKey = 'contacts.shared';
 
   final Map<String, PublicIdentity> _contacts = {};
+
+  /// Local names, keyed the same way. A person publishes the name they
+  /// chose; this is the one you call them. Kept apart from the identity so
+  /// it is never confused with something they signed — and never sent
+  /// anywhere, because it is nobody else's business what you call them.
+  final Map<String, String> _aliases = {};
   bool _loaded = false;
+  bool _shared = false;
 
   List<PublicIdentity> get contacts {
     final list = _contacts.values.toList()
-      ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+      ..sort((a, b) =>
+          displayName(a).toLowerCase().compareTo(displayName(b).toLowerCase()));
     return list;
   }
 
-  String get _key => 'contacts.v1${IdentityService.instance.scope}';
+  /// Whether every account on this device draws on the same address book.
+  ///
+  /// Off by default, and that default matters: keeping a work identity and a
+  /// personal one apart is one of the reasons to have two, and it is no use
+  /// if the people are shared. Some people do want one address book across
+  /// both, though, so it is a choice rather than a rule.
+  bool get shared => _shared;
+
+  Future<void> setShared(bool value) async {
+    if (_shared == value) return;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_sharedPrefKey, value);
+    _shared = value;
+    // The set of contacts is a different set now.
+    reset();
+    await load();
+  }
+
+  /// Forgets what is held in memory, so the next account starts from its own
+  /// storage. Without this, switching identity kept showing the previous
+  /// account's contacts — they were merely hidden behind a different key,
+  /// not actually reloaded.
+  void reset() {
+    _contacts.clear();
+    _aliases.clear();
+    _loaded = false;
+    notifyListeners();
+  }
+
+  String get _key =>
+      _shared ? _prefKey : 'contacts.v1${IdentityService.instance.scope}';
+
+  String get _aliasKey => '$_key.alias';
+
+  /// What to call someone: the name you gave them if you gave them one,
+  /// otherwise the name they publish.
+  String displayName(PublicIdentity person) {
+    final alias = _aliases[person.x25519PublicKey];
+    return alias == null || alias.isEmpty ? person.name : alias;
+  }
+
+  bool hasAlias(String x25519PublicKey) =>
+      (_aliases[x25519PublicKey] ?? '').isNotEmpty;
+
+  /// Renames a contact locally. An empty [name] goes back to theirs.
+  Future<void> setAlias(String x25519PublicKey, String name) async {
+    await load();
+    final trimmed = name.trim();
+    if (trimmed.isEmpty) {
+      _aliases.remove(x25519PublicKey);
+    } else {
+      _aliases[x25519PublicKey] = trimmed;
+    }
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_aliasKey, jsonEncode(_aliases));
+    notifyListeners();
+  }
 
   Future<void> load() async {
     if (_loaded) return;
     _loaded = true;
     final prefs = await SharedPreferences.getInstance();
+    _shared = prefs.getBool(_sharedPrefKey) ?? false;
     // Falls back to the unscoped key so contacts saved before accounts
     // existed are not lost.
     final stored =
@@ -49,6 +115,15 @@ class ContactBook extends ChangeNotifier {
       } catch (_) {
         // Skip anything that no longer parses.
       }
+    }
+    try {
+      final aliases = prefs.getString(_aliasKey);
+      if (aliases != null) {
+        (jsonDecode(aliases) as Map<String, dynamic>)
+            .forEach((key, value) => _aliases[key] = value as String);
+      }
+    } catch (_) {
+      // Names are a convenience; a corrupt map is not worth failing over.
     }
     notifyListeners();
   }
@@ -99,7 +174,8 @@ class ContactBook extends ChangeNotifier {
     }
     byKey.remove(exclude);
     final list = byKey.values.toList()
-      ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+      ..sort((a, b) =>
+          displayName(a).toLowerCase().compareTo(displayName(b).toLowerCase()));
     return list;
   }
 }

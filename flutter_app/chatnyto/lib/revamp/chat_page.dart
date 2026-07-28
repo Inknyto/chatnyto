@@ -13,6 +13,7 @@ import '../core/settings/wallpaper_picker.dart';
 import '../core/theme/background_controller.dart';
 import '../core/widgets/connection_status.dart';
 import '../core/widgets/liquid_glass.dart';
+import '../core/widgets/person_avatar.dart';
 import '../core/widgets/wa_components.dart';
 import '../l10n/app_localizations.dart';
 import 'chat_service.dart';
@@ -351,14 +352,13 @@ class _RevampChatPageState extends State<RevampChatPage> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            CircleAvatar(
+            PersonAvatar(
+              name: widget.chat.title,
+              avatar: peer?.avatar,
               radius: 36,
-              child: Icon(
-                widget.chat.isDm
-                    ? Icons.person_rounded
-                    : Icons.groups_rounded,
-                size: 36,
-              ),
+              icon: widget.chat.isDm
+                  ? Icons.person_rounded
+                  : Icons.groups_rounded,
             ),
             const SizedBox(height: 12),
             Text(widget.chat.title,
@@ -427,22 +427,17 @@ class _RevampChatPageState extends State<RevampChatPage> {
             onTap: _showIdentitySheet,
             child: Row(
               children: [
-                Builder(builder: (context) {
-                  final picture = ImageService.decode(peer?.avatar);
-                  return CircleAvatar(
-                    backgroundColor: scheme.primaryContainer,
-                    backgroundImage:
-                        picture == null ? null : MemoryImage(picture),
-                    child: picture != null
-                        ? null
-                        : Icon(
-                            widget.chat.isDm
-                                ? Icons.person_rounded
-                                : Icons.groups_rounded,
-                            color: scheme.onPrimaryContainer,
-                          ),
-                  );
-                }),
+                // The header's tap opens the details sheet, which is the
+                // route to the picture; a second meaning on the avatar
+                // alone would just be a smaller, less findable version.
+                PersonAvatar(
+                  name: widget.chat.title,
+                  avatar: peer?.avatar,
+                  viewable: false,
+                  icon: widget.chat.isDm
+                      ? Icons.person_rounded
+                      : Icons.groups_rounded,
+                ),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Column(
@@ -559,6 +554,10 @@ class _RevampChatPageState extends State<RevampChatPage> {
                     return WaMessageBubble(
                       isMine: mine,
                       timeStamp: message.timeLabel,
+                      // Only in a one-to-one chat: a group has no single
+                      // "they have it", so it shows no ticks at all.
+                      status:
+                          widget.chat.isDm ? message.status : null,
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [

@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
-import '../core/media/image_service.dart';
 import '../core/widgets/liquid_glass.dart';
+import '../core/widgets/person_avatar.dart';
 import 'call_service.dart';
 
 /// The full-screen call: who you are talking to, how long for, and the
@@ -24,11 +24,16 @@ class _CallPageState extends State<CallPage> {
   void initState() {
     super.initState();
     _calls.addListener(_onChanged);
+    _calls.bannerSuppressed = true;
   }
 
   @override
   void dispose() {
     _calls.removeListener(_onChanged);
+    // After the frame: this runs while the route is being torn down, and
+    // the banner that reappears must not be asked to rebuild mid-teardown.
+    WidgetsBinding.instance.addPostFrameCallback(
+        (_) => _calls.bannerSuppressed = false);
     super.dispose();
   }
 
@@ -64,7 +69,12 @@ class _CallPageState extends State<CallPage> {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final picture = ImageService.decode(widget.avatar);
+    // The caller's own screen is opened with the picture it already has;
+    // an incoming call is pushed from the app shell, which knows nothing —
+    // so the service carries it too.
+    final avatar = widget.avatar?.isNotEmpty == true
+        ? widget.avatar
+        : _calls.peerAvatar;
     final ringing = _calls.state == CallState.ringing;
     final active = _calls.state == CallState.active;
     return GlassBackground(
@@ -73,23 +83,23 @@ class _CallPageState extends State<CallPage> {
         body: SafeArea(
           child: Column(
             children: [
+              // Leaving a call running while you look something up is
+              // normal; the banner at the top of the app brings you back.
+              Align(
+                alignment: Alignment.centerLeft,
+                child: IconButton(
+                  tooltip: 'Back to the app',
+                  icon: const Icon(Icons.keyboard_arrow_down_rounded),
+                  onPressed: Navigator.canPop(context)
+                      ? () => Navigator.pop(context)
+                      : null,
+                ),
+              ),
               const Spacer(),
-              CircleAvatar(
+              PersonAvatar(
+                name: _calls.peerName,
+                avatar: avatar,
                 radius: 62,
-                backgroundColor: scheme.primaryContainer,
-                backgroundImage:
-                    picture == null ? null : MemoryImage(picture),
-                child: picture != null
-                    ? null
-                    : Text(
-                        _calls.peerName.isEmpty
-                            ? '?'
-                            : _calls.peerName[0].toUpperCase(),
-                        style: TextStyle(
-                          fontSize: 44,
-                          color: scheme.onPrimaryContainer,
-                        ),
-                      ),
               ),
               const SizedBox(height: 20),
               Text(
@@ -112,15 +122,21 @@ class _CallPageState extends State<CallPage> {
                 padding: const EdgeInsets.symmetric(
                     horizontal: 14, vertical: 8),
                 radius: 20,
-                child: const Row(
+                child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.lock_rounded, size: 14),
-                    SizedBox(width: 6),
+                    const Icon(Icons.lock_rounded, size: 14),
+                    const SizedBox(width: 6),
                     Flexible(
                       child: Text(
-                        'End-to-end encrypted · direct between your devices',
-                        style: TextStyle(fontSize: 11),
+                        // Worth saying which road the audio took: relayed
+                        // calls sound narrower, and that is the reason.
+                        _calls.relaying
+                            ? 'End-to-end encrypted · relayed through your '
+                                'network, because there is no direct route'
+                            : 'End-to-end encrypted · direct between your '
+                                'devices',
+                        style: const TextStyle(fontSize: 11),
                         textAlign: TextAlign.center,
                       ),
                     ),

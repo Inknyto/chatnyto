@@ -9,6 +9,8 @@ import '../core/brokers/broker_service.dart';
 import '../core/crypto/crypto_service.dart';
 import '../core/notifications/notification_service.dart';
 import '../revamp/chat_service.dart';
+import 'ice_directory.dart';
+import 'voice_relay.dart';
 
 /// Where a call is in its life.
 enum CallState { idle, dialling, ringing, connecting, active, ended }
@@ -65,23 +67,41 @@ class CallRecord {
 /// Signalling (ring, answer, decline, hang up, and the WebRTC offer/answer
 /// and ICE candidates) travels inside the pair's existing end-to-end
 /// encrypted DM channel — there is no call server and no account anywhere.
-/// The audio itself is a direct peer-to-peer WebRTC stream, which is what
-/// makes calls work on a local network with no internet at all: on the same
-/// WiFi or the LoRa box's access point the two devices reach each other
-/// directly, so no STUN or TURN server is involved.
 ///
-/// A call needs far more bandwidth than a text message, so it is only
-/// offered when the two devices share an IP network. Over a LoRa link, which
-/// carries a few kilobits per second, voice is not possible; messages still
-/// are.
+/// The audio takes the best road it can find, in this order:
+///
+///  1. **Direct.** On one network — the same WiFi, the LoRa box's access
+///     point — the two devices reach each other and the stream goes
+///     straight across, with no server involved at all.
+///  2. **Through the network's own call servers.** Away from that, a phone
+///     behind mobile data has no address the other side could dial. A STUN
+///     server tells it how it looks from outside; a TURN server forwards
+///     the audio when even that is not enough. Both come from what the
+///     network published about itself, so nothing is built into the app.
+///  3. **Over the broker.** When there is still no route, the audio is
+///     encrypted and published on the same topic as the messages. It is
+///     narrower — 8 kHz, four bits a sample — but it goes wherever a
+///     message goes, which is the whole point.
+///
+/// The fallback is not a guess: it happens when the direct path has had
+/// [_directTimeout] and not connected. Before this existed, that case just
+/// said "Connecting…" until the caller gave up.
 class CallService extends ChangeNotifier {
   CallService._();
 
   static final CallService instance = CallService._();
 
-  static const _historyKey = 'calls.history.v1';
+  /// History belongs to whoever made the calls, so it follows the account.
+  String get _historyKey => 'calls.history.v1${IdentityService.instance.scope}';
   static const _maxHistory = 100;
   static const _ringTimeout = Duration(seconds: 45);
+
+  /// How long a direct connection gets before the audio is relayed through
+  /// the broker instead. Long enough for ICE to finish on a slow mobile
+  /// network, short enough that a call that cannot connect directly does not
+  /// sit on "Connecting…" until the caller gives up — which is exactly what
+  /// it used to do.
+  static const _directTimeout = Duration(seconds: 8);
 
   final List<CallRecord> _history = [];
   bool _loaded = false;
@@ -90,6 +110,7 @@ class CallService extends ChangeNotifier {
   ChatEntry? _chat;
   String _peerName = '';
   String _peerFingerprint = '';
+  String _peerAvatar = '';
   bool _outgoing = false;
   bool _muted = false;
   bool _speaker = true;
@@ -100,14 +121,38 @@ class CallService extends ChangeNotifier {
   RTCPeerConnection? _peer;
   MediaStream? _localStream;
   String _iceState = '';
+  Timer? _directTimer;
+  bool _relaying = false;
 
   /// Where the media path has got to, for the call screen's status line.
   String get iceState => _iceState;
+
+  /// True while the audio is going through the broker because no direct
+  /// route between the two devices could be found. Surfaced on the call
+  /// screen: the sound is narrower and it is fair to say why.
+  bool get relaying => _relaying;
   final List<RTCIceCandidate> _pendingCandidates = [];
   bool _remoteDescriptionSet = false;
 
+  bool _bannerSuppressed = false;
+
+  /// True while the call screen itself is what the user is looking at, so
+  /// the "you are on a call" banner does not sit on top of the call.
+  bool get bannerSuppressed => _bannerSuppressed;
+
+  set bannerSuppressed(bool value) {
+    if (_bannerSuppressed == value) return;
+    _bannerSuppressed = value;
+    notifyListeners();
+  }
+
   CallState get state => _state;
   String get peerName => _peerName;
+
+  /// The other person's picture, base64 JPEG, so the call screen can show
+  /// who is ringing however the screen was reached — from the chat, from the
+  /// lock screen, or from a notification.
+  String get peerAvatar => _peerAvatar;
   bool get muted => _muted;
   bool get speakerOn => _speaker;
   bool get inCall => _state != CallState.idle && _state != CallState.ended;
@@ -153,6 +198,14 @@ class CallService extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Drops what is held for the account being left. Who you called is as
+  /// much that account's business as what you wrote.
+  void reset() {
+    _history.clear();
+    _loaded = false;
+    notifyListeners();
+  }
+
   // ------------------------------------------------------------- outgoing
 
   /// Rings [chat]'s peer. Only direct chats can be called.
@@ -170,6 +223,7 @@ class CallService extends ChangeNotifier {
     _chat = chat;
     _peerName = chat.title;
     _peerFingerprint = peer.fingerprint;
+    _peerAvatar = peer.avatar;
     _outgoing = true;
     _setState(CallState.dialling);
 
@@ -208,6 +262,7 @@ class CallService extends ChangeNotifier {
       });
       await _peer!.setLocalDescription(answer);
       await _send({'call': 'answer', 'sdp': answer.sdp});
+      _armDirectTimeout();
     } catch (error) {
       await _finish(answered: false, reason: 'Could not answer: $error');
     }
@@ -229,6 +284,7 @@ class CallService extends ChangeNotifier {
 
   Future<void> toggleMute() async {
     _muted = !_muted;
+    VoiceRelay.instance.muted = _muted;
     for (final track in _localStream?.getAudioTracks() ?? []) {
       track.enabled = !_muted;
     }
@@ -241,6 +297,7 @@ class CallService extends ChangeNotifier {
       for (final track in _localStream?.getAudioTracks() ?? []) {
         await track.enableSpeakerphone(_speaker);
       }
+      if (_relaying) await Helper.setSpeakerphoneOn(_speaker);
     } catch (error) {
       debugPrint('Could not switch the speaker: $error');
     }
@@ -265,6 +322,7 @@ class CallService extends ChangeNotifier {
         _chat = chat;
         _peerName = chat.title;
         _peerFingerprint = chat.peerIdentity?.fingerprint ?? '';
+        _peerAvatar = chat.peerIdentity?.avatar ?? '';
         _outgoing = false;
         try {
           await _startMedia();
@@ -294,6 +352,7 @@ class CallService extends ChangeNotifier {
         await _drainCandidates();
         _ringTimer?.cancel();
         _setState(CallState.connecting);
+        _armDirectTimeout();
 
       case 'ice':
         final candidate = RTCIceCandidate(
@@ -308,6 +367,19 @@ class CallService extends ChangeNotifier {
           // Candidates can arrive before the description they belong to.
           _pendingCandidates.add(candidate);
         }
+
+      case 'relay':
+        // The other side could not find a direct route. Follow it over,
+        // without telling it back — that would bounce forever.
+        if (inCall) await _startRelay(tellPeer: false);
+
+      case 'voice':
+        final frame = data['f'] as String?;
+        if (frame == null) return;
+        // Hearing audio is itself proof the relay is working, which matters
+        // for the side whose own switch-over is still in flight.
+        if (!_relaying && inCall) await _startRelay(tellPeer: false);
+        VoiceRelay.instance.playFrame(base64Decode(frame));
 
       case 'decline':
         await _finish(answered: false, reason: 'Declined');
@@ -342,12 +414,16 @@ class CallService extends ChangeNotifier {
       'audio': true,
       'video': false,
     });
-    // No STUN or TURN: on a shared network the two devices find each other
-    // directly, which is the case this app is built for (same WiFi, or the
-    // LoRa box's access point). Adding a public STUN server here would also
-    // be the app's only unsolicited internet connection.
+    // On one network the two devices find each other directly and this list
+    // is empty, which is the case the app is built for. Away from it — two
+    // phones on mobile data, each behind the carrier's NAT — neither knows
+    // an address the other could dial, and without a STUN server to ask,
+    // the call can never connect. See [IceDirectory] for where these come
+    // from and why an offline app still gets none.
+    final iceServers = await IceDirectory.instance.servers();
+    debugPrint('[call] ice servers: ${iceServers.length}');
     _peer = await createPeerConnection({
-      'iceServers': <Map<String, dynamic>>[],
+      'iceServers': iceServers,
       'sdpSemantics': 'unified-plan',
     });
 
@@ -382,23 +458,18 @@ class CallService extends ChangeNotifier {
     _peer!.onConnectionState = (state) {
       switch (state) {
         case RTCPeerConnectionState.RTCPeerConnectionStateConnected:
-          if (_connectedAt == null) {
-            _connectedAt = DateTime.now();
-            _tick?.cancel();
-            _tick = Timer.periodic(
-                const Duration(seconds: 1), (_) => notifyListeners());
-            _setState(CallState.active);
-          }
+          _directTimer?.cancel();
+          _goLive();
         case RTCPeerConnectionState.RTCPeerConnectionStateFailed:
         case RTCPeerConnectionState.RTCPeerConnectionStateClosed:
         case RTCPeerConnectionState.RTCPeerConnectionStateDisconnected:
-          if (inCall) {
-            _finish(
-              answered: _connectedAt != null,
-              reason: _connectedAt == null
-                  ? 'Could not reach the other device'
-                  : 'Call ended',
-            );
+          // A direct path that fails before the call is up is not the end of
+          // the call any more: there is still the broker, which both devices
+          // are demonstrably able to reach.
+          if (_connectedAt == null && !_relaying && inCall) {
+            _startRelay(tellPeer: true);
+          } else if (inCall && !_relaying) {
+            _finish(answered: _connectedAt != null, reason: 'Call ended');
           }
         default:
           break;
@@ -406,12 +477,84 @@ class CallService extends ChangeNotifier {
     };
   }
 
+  /// Marks the call connected and starts the timer, whichever path the
+  /// audio ended up taking.
+  void _goLive() {
+    if (_connectedAt != null) return;
+    _connectedAt = DateTime.now();
+    _tick?.cancel();
+    _tick =
+        Timer.periodic(const Duration(seconds: 1), (_) => notifyListeners());
+    _setState(CallState.active);
+  }
+
+  // ------------------------------------------------------------ the relay
+
+  /// Gives the direct path a fixed amount of time, then falls back.
+  void _armDirectTimeout() {
+    _directTimer?.cancel();
+    _directTimer = Timer(_directTimeout, () {
+      if (inCall && _connectedAt == null && !_relaying) {
+        debugPrint('[call] no direct route in ${_directTimeout.inSeconds}s');
+        _startRelay(tellPeer: true);
+      }
+    });
+  }
+
+  /// Moves the call onto the broker. [tellPeer] is set by whichever side
+  /// noticed first; the other switches when it hears about it, so both ends
+  /// are never half in one mode and half in the other.
+  Future<void> _startRelay({required bool tellPeer}) async {
+    if (_relaying || !inCall) return;
+    _relaying = true;
+    _directTimer?.cancel();
+    if (tellPeer) await _send({'call': 'relay'});
+
+    // The microphone cannot be held twice. WebRTC's attempt is over.
+    for (final track in _localStream?.getTracks() ?? []) {
+      await track.stop();
+    }
+    await _localStream?.dispose();
+    _localStream = null;
+    await _peer?.close();
+    _peer = null;
+
+    VoiceRelay.instance.onFrame = _sendVoice;
+    VoiceRelay.instance.muted = _muted;
+    final started = await VoiceRelay.instance.start();
+    if (!started) {
+      _relaying = false;
+      await _finish(
+        answered: _connectedAt != null,
+        reason: VoiceRelay.supported
+            ? 'Could not reach the other device'
+            : 'No direct route, and this device cannot relay a call',
+      );
+      return;
+    }
+    _goLive();
+    notifyListeners();
+  }
+
+  void _sendVoice(Uint8List frame) {
+    final chat = _chat;
+    if (chat == null || !_relaying) return;
+    ChatService.instance.sendVoiceFrame(chat, frame);
+  }
+
   Future<void> _finish({required bool answered, String? reason}) async {
     await NotificationService.instance.cancelIncomingCall();
     _ringTimer?.cancel();
     _tick?.cancel();
+    _directTimer?.cancel();
     _ringTimer = null;
     _tick = null;
+    _directTimer = null;
+    if (_relaying) {
+      _relaying = false;
+      VoiceRelay.instance.onFrame = null;
+      await VoiceRelay.instance.stop();
+    }
 
     if (_peerFingerprint.isNotEmpty || _peerName.isNotEmpty) {
       _history.add(CallRecord(
@@ -445,6 +588,7 @@ class CallService extends ChangeNotifier {
       if (_state == CallState.ended) {
         _peerName = '';
         _peerFingerprint = '';
+        _peerAvatar = '';
         _setState(CallState.idle);
       }
     });

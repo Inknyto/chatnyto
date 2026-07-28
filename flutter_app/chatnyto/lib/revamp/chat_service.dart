@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 
@@ -26,6 +27,8 @@ class ChatEntry {
     this.lastMessage = '',
     this.lastTs = 0,
     this.unread = 0,
+    this.lastFromMe = false,
+    this.lastStatus,
   }) : admins = admins ?? [];
 
   String id; // 'dm:<fingerprint>' or 'group:<slug>'
@@ -51,6 +54,12 @@ class ChatEntry {
   int lastTs;
   int unread;
 
+  /// Whether the newest message in the conversation is one of ours, and how
+  /// far it got — so the chat list can show the same tick as the bubble,
+  /// which is the whole point of having it there.
+  bool lastFromMe;
+  MessageStatus? lastStatus;
+
   bool get isDm => kind == 'dm';
   bool get isPublicGroup => kind == 'group' && secret.isEmpty;
 
@@ -72,6 +81,8 @@ class ChatEntry {
         'last': lastMessage,
         'ts': lastTs,
         'unread': unread,
+        'mine': lastFromMe,
+        if (lastStatus != null) 'lastStatus': lastStatus!.name,
       };
 
   static ChatEntry fromJson(Map<String, dynamic> json) => ChatEntry(
@@ -90,7 +101,31 @@ class ChatEntry {
         lastMessage: json['last'] ?? '',
         lastTs: (json['ts'] as num?)?.toInt() ?? 0,
         unread: (json['unread'] as num?)?.toInt() ?? 0,
+        lastFromMe: json['mine'] as bool? ?? false,
+        lastStatus: MessageStatus.values
+            .where((s) => s.name == json['lastStatus'])
+            .firstOrNull,
       );
+}
+
+/// How far one of your own messages has got.
+///
+/// Only meaningful for messages you sent: nobody reports back on what you
+/// received. The steps are the honest ones the app can actually observe —
+/// waiting for a network, handed to a broker, acknowledged by the other
+/// device, and opened by the person.
+enum MessageStatus {
+  /// Written while offline; sitting in the outbox.
+  pending,
+
+  /// Published to at least one broker.
+  sent,
+
+  /// The other device has it and said so.
+  delivered,
+
+  /// The other person has opened the conversation since it arrived.
+  read,
 }
 
 /// A chat message. [text] is always the plain-text form (used for previews
@@ -104,6 +139,7 @@ class RevampMessage {
     required this.ts,
     this.delta,
     this.image,
+    this.status = MessageStatus.sent,
   });
 
   final String from; // sender fingerprint ('' when anonymous)
@@ -112,6 +148,11 @@ class RevampMessage {
   final int ts;
   final List<dynamic>? delta; // Quill delta operations, when formatted
   final String? image; // base64 JPEG attachment
+
+  /// Changes as receipts come back, so it is not final. Never sent over the
+  /// wire: it is what *this* device knows about a message's progress, and
+  /// the other end has its own view.
+  MessageStatus status;
 
   bool get isRich => delta != null && delta!.isNotEmpty;
   bool get hasImage => image != null && image!.isNotEmpty;
@@ -123,7 +164,14 @@ class RevampMessage {
         'ts': ts,
         if (isRich) 'd': delta,
         if (hasImage) 'img': image,
+        // Stored so the ticks survive a restart.
+        's': status.name,
       };
+
+  /// What actually goes over the wire. The status is left out on purpose:
+  /// it is one device's account of a message's progress, and telling the
+  /// other end "this is delivered" before it has it would be nonsense.
+  Map<String, dynamic> toWire() => toJson()..remove('s');
 
   static RevampMessage? fromJson(Map<String, dynamic> json) {
     try {
@@ -135,6 +183,10 @@ class RevampMessage {
         ts: (json['ts'] as num?)?.toInt() ?? 0,
         delta: json['d'] == null ? null : List<dynamic>.from(json['d']),
         image: json['img'] as String?,
+        status: MessageStatus.values.firstWhere(
+          (s) => s.name == json['s'],
+          orElse: () => MessageStatus.sent,
+        ),
       );
     } catch (_) {
       return null;
@@ -223,8 +275,25 @@ class ChatService extends ChangeNotifier {
     _messages.clear();
     _outbox.clear();
     _lastReplyAt.clear();
+    _keyCache.clear();
+    _pendingReceipts.clear();
+    _receiptTimer?.cancel();
+    _receiptTimer = null;
+    _myFingerprint = null;
     _initialized = false;
     notifyListeners();
+  }
+
+  /// This account's fingerprint. [IdentityService.publicIdentity] re-signs
+  /// the whole advertisement every time it is asked, which is fine once per
+  /// message and far too much for every frame of a relayed call.
+  String? _myFingerprint;
+
+  Future<String> _fingerprint() async {
+    if (_myFingerprint != null) return _myFingerprint!;
+    if (!IdentityService.instance.isUnlocked) return '';
+    return _myFingerprint =
+        (await IdentityService.instance.publicIdentity()).fingerprint;
   }
 
   // ---------------------------------------------------------------- store
@@ -513,9 +582,13 @@ class ChatService extends ChangeNotifier {
 
   /// Moves a chat's stored history to a new id (used when a group rename
   /// changes its topic).
+  /// Moves a group's stored history to a new id. Its key is derived from
+  /// the topic, and the topic is about to change, so the cached one goes.
   Future<void> _moveChatStorage(ChatEntry chat, String newId) async {
     final oldId = chat.id;
     if (oldId == newId) return;
+    _keyCache.remove(oldId);
+    _keyCache.remove(newId);
     final messages = await messagesFor(chat);
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('$_encMsgsKeyPrefix$oldId');
@@ -540,13 +613,26 @@ class ChatService extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Channel keys are expensive to derive — an X25519 agreement for a direct
+  /// chat, 60 000 rounds of PBKDF2 for a group — and are needed for every
+  /// message that arrives on any topic, several times a second while a call
+  /// is being relayed. They depend only on the chat and the unlocked
+  /// identity, so they are worked out once and kept for as long as both hold.
+  final Map<String, SecretKey> _keyCache = {};
+
   Future<SecretKey?> _keyFor(ChatEntry chat) async {
+    final cached = _keyCache[chat.id];
+    if (cached != null) return cached;
+    SecretKey key;
     if (chat.isDm) {
       final peer = chat.peerIdentity;
       if (peer == null || !IdentityService.instance.isUnlocked) return null;
-      return IdentityService.instance.sharedKeyWith(peer);
+      key = await IdentityService.instance.sharedKeyWith(peer);
+    } else {
+      key = await MessageCrypto.deriveChannelKey(chat.secret, chat.topic);
     }
-    return MessageCrypto.deriveChannelKey(chat.secret, chat.topic);
+    _keyCache[chat.id] = key;
+    return key;
   }
 
   // ------------------------------------------------------------ messaging
@@ -572,14 +658,17 @@ class ChatService extends ChangeNotifier {
       ts: DateTime.now().millisecondsSinceEpoch,
       delta: delta,
       image: image,
+      status: BrokerService.instance.anyConnected
+          ? MessageStatus.sent
+          : MessageStatus.pending,
     );
     await _append(chat, message, countUnread: false);
     if (BrokerService.instance.anyConnected) {
       final envelope = await MessageCrypto.encryptEnvelope(
-          jsonEncode(message.toJson()), key);
+          jsonEncode(message.toWire()), key);
       BrokerService.instance.publishToAll(chat.topic, envelope);
     } else {
-      _outbox.add({'chat': chat.id, 'msg': message.toJson()});
+      _outbox.add({'chat': chat.id, 'msg': message.toWire()});
       await _saveOutbox();
     }
     return true;
@@ -598,10 +687,111 @@ class ChatService extends ChangeNotifier {
       final key = await _keyFor(chat);
       if (key == null) continue;
       final envelope = await MessageCrypto.encryptEnvelope(
-          jsonEncode(message.toJson()), key);
+          jsonEncode(message.toWire()), key);
       BrokerService.instance.publishToAll(chat.topic, envelope);
+      // It has left the device: one tick instead of the clock.
+      await _setStatus(chat, message.ts, MessageStatus.sent);
     }
     await _saveOutbox();
+  }
+
+  // ------------------------------------------------------------- receipts
+
+  /// Moves one of our own messages forward, never backward: a delivery
+  /// receipt arriving after a read receipt (they cross, on a slow link)
+  /// must not un-read the message.
+  Future<void> _setStatus(
+      ChatEntry chat, int ts, MessageStatus status) async {
+    final list = _messages[chat.id];
+    if (list == null) return;
+    var changed = false;
+    for (final message in list) {
+      if (message.ts != ts) continue;
+      if (message.status.index >= status.index) continue;
+      message.status = status;
+      changed = true;
+    }
+    if (!changed) return;
+    if (ts == chat.lastTs && chat.lastFromMe) {
+      chat.lastStatus = status;
+      await _saveChats();
+    }
+    await _saveMessages(chat);
+    notifyListeners();
+  }
+
+  /// Queues a "got it" for [ts], and sends what has piled up shortly after.
+  ///
+  /// Catching up after being offline delivers a whole conversation at once,
+  /// and a separate publish for each message would answer a burst with a
+  /// burst. One receipt listing all of them says exactly the same thing.
+  void _acknowledge(ChatEntry chat, int ts) {
+    _pendingReceipts.putIfAbsent(chat.id, () => <int>{}).add(ts);
+    _receiptTimer ??= Timer(const Duration(milliseconds: 600), () {
+      _receiptTimer = null;
+      final batches = Map<String, Set<int>>.from(_pendingReceipts);
+      _pendingReceipts.clear();
+      for (final entry in batches.entries) {
+        final chat = _chats.where((c) => c.id == entry.key).firstOrNull;
+        if (chat == null) continue;
+        _sendReceipt(chat, entry.value.toList(), MessageStatus.delivered);
+      }
+    });
+  }
+
+  final Map<String, Set<int>> _pendingReceipts = {};
+  Timer? _receiptTimer;
+
+  /// Tells the sender what happened to their messages.
+  ///
+  /// Only for direct chats. In a group there is no single answer — "read"
+  /// by whom, out of how many? — and two ticks that mean "somebody, maybe"
+  /// would be worse than no ticks at all.
+  Future<void> _sendReceipt(
+      ChatEntry chat, List<int> stamps, MessageStatus status) async {
+    if (!chat.isDm || stamps.isEmpty) return;
+    final key = await _keyFor(chat);
+    if (key == null) return;
+    final envelope = await MessageCrypto.encryptEnvelope(
+      jsonEncode({
+        'type': 'receipt',
+        'st': status.name,
+        'ts': stamps,
+        'from': await _fingerprint(),
+      }),
+      key,
+    );
+    BrokerService.instance.publishToAll(chat.topic, envelope);
+  }
+
+  Future<void> _applyReceipt(
+      ChatEntry chat, Map<String, dynamic> data) async {
+    if (data['from'] == await _fingerprint()) return;
+    final status = MessageStatus.values
+        .where((s) => s.name == data['st'])
+        .firstOrNull;
+    if (status == null) return;
+    final stamps = (data['ts'] as List?)?.whereType<num>() ?? const [];
+    if (stamps.isEmpty) return;
+
+    // Deliberately not loading the history to apply this. Decrypting a
+    // conversation's whole stored blob — which for a chat with pictures in
+    // it is megabytes — on the arrival of every receipt is enough work to
+    // stall the interface. A chat that is not open only needs its preview
+    // tick to be right; the rest is caught up the moment it is opened.
+    if (!_messages.containsKey(chat.id)) {
+      if (chat.lastFromMe &&
+          stamps.any((s) => s.toInt() == chat.lastTs) &&
+          (chat.lastStatus?.index ?? -1) < status.index) {
+        chat.lastStatus = status;
+        await _saveChats();
+        notifyListeners();
+      }
+      return;
+    }
+    for (final stamp in stamps) {
+      await _setStatus(chat, stamp.toInt(), status);
+    }
   }
 
   /// Adds [message] to the chat; returns false when it was a duplicate
@@ -617,6 +807,9 @@ class ChatService extends ChangeNotifier {
     if (message.ts >= chat.lastTs) {
       chat.lastMessage = message.text;
       chat.lastTs = message.ts;
+      chat.lastFromMe =
+          message.from.isNotEmpty && message.from == await _fingerprint();
+      chat.lastStatus = chat.lastFromMe ? message.status : null;
     }
     if (countUnread) chat.unread += 1;
     await _saveMessages(chat);
@@ -625,7 +818,15 @@ class ChatService extends ChangeNotifier {
     return true;
   }
 
-  void markRead(ChatEntry chat) {
+  /// Opening a conversation is what "read" means here — the messages are on
+  /// screen. The other side is told so their ticks can turn blue.
+  Future<void> markRead(ChatEntry chat) async {
+    final me = await _fingerprint();
+    final theirs = (await messagesFor(chat))
+        .where((m) => m.from.isNotEmpty && m.from != me)
+        .map((m) => m.ts)
+        .toList();
+    await _sendReceipt(chat, theirs, MessageStatus.read);
     if (chat.unread != 0) {
       chat.unread = 0;
       _saveChats();
@@ -695,6 +896,29 @@ class ChatService extends ChangeNotifier {
         : '';
     final envelope = await MessageCrypto.encryptEnvelope(
         jsonEncode({...data, 'type': 'call', 'from': me}), key);
+    BrokerService.instance.publishToAll(chat.topic, envelope);
+  }
+
+  /// A frame of relayed call audio, encrypted like everything else on this
+  /// channel — the broker forwards voice it cannot listen to any more than
+  /// it can read the messages.
+  ///
+  /// Sent at best effort: a frame that misses its moment is worth less than
+  /// nothing, so nothing is queued, retried, or written down. The sender's
+  /// fingerprint rides along because the broker echoes our own publications
+  /// back to us, and a device must not play its own voice.
+  Future<void> sendVoiceFrame(ChatEntry chat, List<int> frame) async {
+    final key = await _keyFor(chat);
+    if (key == null) return;
+    final envelope = await MessageCrypto.encryptEnvelope(
+      jsonEncode({
+        'type': 'call',
+        'call': 'voice',
+        'from': await _fingerprint(),
+        'f': base64Encode(frame),
+      }),
+      key,
+    );
     BrokerService.instance.publishToAll(chat.topic, envelope);
   }
 
@@ -783,11 +1007,12 @@ class ChatService extends ChangeNotifier {
       // so calls need no server of their own. Our own signalling comes back
       // from the broker on the same topic: ignore it, or the caller rings
       // itself, finds itself busy, and declines its own call.
-      if (IdentityService.instance.isUnlocked) {
-        final me = (await IdentityService.instance.publicIdentity()).fingerprint;
-        if (data['from'] == me) return;
-      }
+      if (data['from'] == await _fingerprint()) return;
       await onCallSignal?.call(chat, data);
+      return;
+    }
+    if (data['type'] == 'receipt') {
+      await _applyReceipt(chat, data);
       return;
     }
     if (data['type'] == 'group_rename' ||
@@ -798,16 +1023,16 @@ class ChatService extends ChangeNotifier {
     }
     final message = RevampMessage.fromJson(data);
     if (message == null) return;
-    String myFp = '';
-    if (IdentityService.instance.isUnlocked) {
-      myFp = (await IdentityService.instance.publicIdentity()).fingerprint;
-    }
+    final myFp = await _fingerprint();
     if (message.from == myFp && message.from.isNotEmpty) {
       // Our own message echoed back (broker loopback or replay).
       await _append(chat, message, countUnread: false);
       return;
     }
     final isNew = await _append(chat, message, countUnread: true);
+    // Acknowledged whether or not it is new: a resend usually means the
+    // first receipt was the part that went missing.
+    _acknowledge(chat, message.ts);
     if (isNew) {
       await NotificationService.instance.showMessage(
         chatId: chat.id,

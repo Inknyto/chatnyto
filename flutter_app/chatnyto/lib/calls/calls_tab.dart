@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 
 import '../core/brokers/broker_service.dart';
+import '../core/crypto/contact_book.dart';
 import '../core/crypto/crypto_service.dart';
 import '../core/widgets/liquid_glass.dart';
+import '../core/widgets/person_avatar.dart';
 import '../revamp/chat_service.dart';
 import 'call_page.dart';
 import 'call_service.dart';
@@ -115,6 +117,14 @@ class _CallsTabState extends State<CallsTab> {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final records = _calls.history;
+    // History keeps a name and a fingerprint, not a picture — a face can
+    // change, and the one to show is the current one. Built once here
+    // rather than looked up per row.
+    final faces = {
+      for (final person in ContactBook.instance
+          .merged(BrokerService.instance.peers))
+        person.fingerprint: person,
+    };
     return Scaffold(
       backgroundColor: Colors.transparent,
       body: records.isEmpty
@@ -136,7 +146,9 @@ class _CallsTabState extends State<CallsTab> {
                     Text(
                       'Voice calls go straight between the two devices, '
                       'encrypted end to end, with no server in the middle. '
-                      'Both of you need to be on the same network.',
+                      'When there is no direct route, the audio is relayed '
+                      'over your network instead — still encrypted, and '
+                      'still nobody else\'s to listen to.',
                       textAlign: TextAlign.center,
                       style: TextStyle(fontSize: 13),
                     ),
@@ -162,14 +174,9 @@ class _CallsTabState extends State<CallsTab> {
                       horizontal: 8, vertical: 4),
                   padding: EdgeInsets.zero,
                   child: ListTile(
-                    leading: CircleAvatar(
-                      backgroundColor: scheme.primaryContainer,
-                      child: Text(
-                        record.peerName.isEmpty
-                            ? '?'
-                            : record.peerName[0].toUpperCase(),
-                        style: TextStyle(color: scheme.onPrimaryContainer),
-                      ),
+                    leading: PersonAvatar(
+                      name: record.peerName,
+                      avatar: faces[record.peerFingerprint]?.avatar,
                     ),
                     title: Text(
                       record.peerName,

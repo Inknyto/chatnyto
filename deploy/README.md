@@ -12,6 +12,27 @@ encrypted traffic, and can read none of it.
 | `mosquitto` | The MQTT broker. Authenticated users only, restricted to the `chatnyto/#` topic tree. |
 | `profile` | Serves `/.well-known/chatnyto.json`, so the app needs nothing but the domain. |
 | `cloudflared` | Publishes the broker as `wss://<your domain>/mqtt` through a Cloudflare tunnel, so no port is opened on the server. |
+| `coturn` | Optional. Lets two people on mobile data call each other. Off unless `TURN_USER`/`TURN_PASSWORD` are set. |
+
+## Calls
+
+Messages need only the broker. Calls need a route between the two devices,
+and that is a different problem: on one WiFi they find each other and nothing
+else is involved, but on mobile data each phone sits behind the carrier's NAT
+with no address the other could dial.
+
+Setting `TURN_USER`, `TURN_PASSWORD` and `TURN_PUBLIC_IP` starts a coturn
+container and publishes it in the profile, so the app picks it up along with
+everything else. It is the one piece that cannot go through the tunnel — TURN
+is UDP — so its ports have to be open on the server:
+
+```
+3478/udp   3478/tcp   49160-49200/udp
+```
+
+Without it, calls still work between people on the same network, and
+elsewhere the app relays the audio over MQTT instead: narrower sound, but it
+goes through wherever a message does.
 
 ## What the user types
 

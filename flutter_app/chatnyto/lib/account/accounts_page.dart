@@ -4,6 +4,7 @@ import '../core/brokers/broker_service.dart';
 import '../core/crypto/crypto_service.dart';
 import '../core/crypto/password_vault.dart';
 import '../core/widgets/liquid_glass.dart';
+import '../core/widgets/person_avatar.dart';
 import '../revamp/chat_service.dart';
 import '../revamp/home_shell.dart';
 import '../revamp/onboarding.dart';
@@ -58,9 +59,9 @@ class _AccountsPageState extends State<AccountsPage> {
     }
 
     // The previous account's chats are not merely hidden — they are
-    // encrypted under a key this account does not have. Dropping them keeps
-    // the UI honest about that.
-    ChatService.instance.reset();
+    // encrypted under a key this account does not have. Dropping them, and
+    // its contacts and calls with them, keeps the UI honest about that.
+    forgetAccountState();
     await PasswordVault.instance.remember(password);
     await startRevampServices();
     await BrokerService.instance.advertiseEverywhere();
@@ -360,13 +361,15 @@ class _AccountTile extends StatelessWidget {
         children: [
           ListTile(
             onTap: active && unlocked ? null : onOpen,
-            leading: CircleAvatar(
-              backgroundColor:
-                  active ? scheme.primary : scheme.surfaceContainerHighest,
-              foregroundColor:
-                  active ? scheme.onPrimary : scheme.onSurface,
-              child: Text(
-                account.name.isEmpty ? '?' : account.name[0].toUpperCase(),
+            // Each account's own picture, read straight from its storage —
+            // this list is the one place several identities appear side by
+            // side, so telling them apart matters most here.
+            leading: FutureBuilder<String>(
+              future: IdentityService.instance.avatarOf(account.id),
+              builder: (context, snapshot) => PersonAvatar(
+                name: account.name,
+                avatar: snapshot.data,
+                viewable: false,
               ),
             ),
             title: Text(account.name),
@@ -447,7 +450,7 @@ class _NewIdentityPageState extends State<NewIdentityPage> {
     });
     await IdentityService.instance.create(name, _passwordController.text);
     final code = IdentityService.instance.pendingRecoveryCode;
-    ChatService.instance.reset();
+    forgetAccountState();
     await PasswordVault.instance.remember(_passwordController.text);
     await startRevampServices();
     if (!mounted) return;

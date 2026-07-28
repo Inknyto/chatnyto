@@ -4,17 +4,20 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/brokers/broker_service.dart';
 import '../core/brokers/brokers_page.dart';
+import '../core/crypto/contact_book.dart';
 import '../core/crypto/crypto_service.dart';
 import '../core/crypto/password_vault.dart';
 import '../core/media/image_service.dart';
 import '../core/notifications/background_service.dart';
 import '../core/notifications/notification_service.dart';
+import '../core/notifications/ringtones.dart';
 import '../core/settings/wallpaper_picker.dart';
 import '../core/theme/background_controller.dart';
 import '../core/theme/glass_controller.dart';
 import '../core/theme/locale_controller.dart';
 import '../core/theme/theme_controller.dart';
 import '../core/widgets/liquid_glass.dart';
+import '../core/widgets/person_avatar.dart';
 import '../l10n/app_localizations.dart';
 import 'accounts_page.dart';
 import 'security_page.dart';
@@ -36,6 +39,15 @@ class _AccountPageState extends State<AccountPage> {
   String _avatar = '';
   NotificationSound _sound = NotificationSound.chime;
   bool _stayConnected = true;
+
+  /// Whether the phone lets ChatNyto keep running in the background. Assumed
+  /// fine until proven otherwise, so the warning never flashes up on load.
+  bool _unrestricted = true;
+  bool _sharedContacts = false;
+
+  /// Files the user chose for the two alerts; null means the built-in one.
+  String? _callTone;
+  String? _messageTone;
   String _name = '';
   String _email = '';
   String _phone = '';
@@ -54,17 +66,28 @@ class _AccountPageState extends State<AccountPage> {
     final autoConnect = await BrokerService.instance.autoConnectEnabled();
     final sound = await NotificationService.instance.sound();
     final stayConnected = await BackgroundService.instance.enabled();
+    final unrestricted = await BackgroundService.instance.unrestricted();
+    await ContactBook.instance.load();
+    await Ringtones.instance.load();
     final prefs = await SharedPreferences.getInstance();
+    final identity = IdentityService.instance;
     if (!mounted) return;
     setState(() {
       _sound = sound;
       _stayConnected = stayConnected;
+      _unrestricted = unrestricted;
+      _sharedContacts = ContactBook.instance.shared;
+      _callTone = Ringtones.instance.callTone;
+      _messageTone = Ringtones.instance.messageTone;
       _askPassword = askPassword;
       _autoConnect = autoConnect;
       _avatar = prefs.getString(IdentityService.instance.avatarKey) ?? '';
-      _name = prefs.getString('profile.name') ?? '';
-      _email = prefs.getString('profile.email') ?? '';
-      _phone = prefs.getString('profile.phone') ?? '';
+      // Scoped: a second identity has its own name, mail and number, and
+      // showing the first one's would be exactly the leak this is about.
+      _name = prefs.getString(identity.scoped('profile.name')) ??
+          identity.displayName ?? '';
+      _email = prefs.getString(identity.scoped('profile.email')) ?? '';
+      _phone = prefs.getString(identity.scoped('profile.phone')) ?? '';
       _language = LocaleController.instance
           .labelFor(LocaleController.instance.value, systemLabel: 'System');
       _notificationsEnabled = prefs.getBool('notifications') ?? true;
@@ -114,20 +137,22 @@ class _AccountPageState extends State<AccountPage> {
     }
   }
 
-  /// Picks the alert tone; choosing one plays it so it can be heard.
-  Future<void> _pickSound() async {
-    final choice = await showDialog<NotificationSound>(
+  /// Picks the alert tone for messages: one of the built-in ones, or any
+  /// audio file on the device. Choosing plays it so it can be heard.
+  Future<void> _pickMessageSound() async {
+    const fromFile = Object();
+    final choice = await showDialog<Object>(
       context: context,
       builder: (context) => SimpleDialog(
         title: Text(AppLocalizations.of(context).notificationSound),
         children: [
           for (final sound in NotificationSound.values)
             SimpleDialogOption(
-              onPressed: () => Navigator.pop(context, sound),
+              onPressed: () => Navigator.pop<Object>(context, sound),
               child: Row(
                 children: [
                   Icon(
-                    sound == _sound
+                    sound == _sound && _messageTone == null
                         ? Icons.radio_button_checked_rounded
                         : Icons.radio_button_unchecked_rounded,
                     size: 20,
@@ -137,12 +162,85 @@ class _AccountPageState extends State<AccountPage> {
                 ],
               ),
             ),
+          const Divider(),
+          SimpleDialogOption(
+            onPressed: () => Navigator.pop<Object>(context, fromFile),
+            child: Row(
+              children: [
+                Icon(
+                  _messageTone != null
+                      ? Icons.radio_button_checked_rounded
+                      : Icons.radio_button_unchecked_rounded,
+                  size: 20,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(_messageTone == null
+                      ? 'A sound of my own…'
+                      : Ringtones.labelFor(_messageTone)),
+                ),
+                const Icon(Icons.folder_open_rounded, size: 18),
+              ],
+            ),
+          ),
         ],
       ),
     );
     if (choice == null) return;
-    await NotificationService.instance.setSound(choice);
-    if (mounted) setState(() => _sound = choice);
+    if (identical(choice, fromFile)) {
+      final picked = await Ringtones.instance.pickMessageTone();
+      if (picked != null) {
+        await Ringtones.instance.preview(Ringtones.instance.messageTone);
+      }
+      if (mounted) {
+        setState(() => _messageTone = Ringtones.instance.messageTone);
+      }
+      return;
+    }
+    // Going back to a built-in tone means the chosen file is no longer
+    // wanted, so it stops taking up room too.
+    await Ringtones.instance.clearMessageTone();
+    await NotificationService.instance.setSound(choice as NotificationSound);
+    if (mounted) {
+      setState(() {
+        _sound = choice;
+        _messageTone = null;
+      });
+    }
+  }
+
+  /// Picks the ringtone for incoming calls, or goes back to the phone's.
+  Future<void> _pickCallTone() async {
+    if (_callTone != null) {
+      final keep = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Call ringtone'),
+          content: Text(Ringtones.labelFor(_callTone)),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Use the default'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Choose another'),
+            ),
+          ],
+        ),
+      );
+      if (keep == null) return;
+      if (!keep) {
+        await Ringtones.instance.clearCallTone();
+        if (mounted) setState(() => _callTone = null);
+        return;
+      }
+    }
+    final picked = await Ringtones.instance.pickCallTone();
+    if (picked != null) {
+      await Ringtones.instance.preview(Ringtones.instance.callTone);
+    }
+    if (mounted) setState(() => _callTone = Ringtones.instance.callTone);
   }
 
   /// Switches the whole app between English, French and the phone's own
@@ -214,17 +312,17 @@ class _AccountPageState extends State<AccountPage> {
   /// Profile picture: stored locally and advertised (signed) with the
   /// identity, so contacts see a face next to the verified fingerprint.
   Widget _profilePictureTile() {
-    final picture = ImageService.decode(_avatar);
     return LiquidGlass(
       margin: const EdgeInsets.fromLTRB(12, 6, 12, 6),
       child: Row(
         children: [
-          CircleAvatar(
+          // Tapping it shows the picture full size — worth checking what
+          // everyone else is going to see before leaving it there.
+          PersonAvatar(
+            name: _name,
+            avatar: _avatar,
             radius: 30,
-            backgroundImage: picture == null ? null : MemoryImage(picture),
-            child: picture == null
-                ? const Icon(Icons.person_rounded, size: 30)
-                : null,
+            icon: _avatar.isEmpty ? Icons.person_rounded : null,
           ),
           const SizedBox(width: 16),
           Expanded(
@@ -352,6 +450,21 @@ class _AccountPageState extends State<AccountPage> {
                     GlassPageRoute(page: const AccountsPage()),
                   ),
                 ),
+                // Only worth asking once there is more than one identity to
+                // keep apart.
+                if (IdentityService.instance.accounts.length > 1)
+                  SettingsTile.switchTile(
+                    onToggle: (value) async {
+                      await ContactBook.instance.setShared(value);
+                      if (mounted) setState(() => _sharedContacts = value);
+                    },
+                    initialValue: _sharedContacts,
+                    leading: const Icon(Icons.contacts_rounded),
+                    title: const Text('Share contacts between accounts'),
+                    description: const Text(
+                        'Off, each identity keeps its own address book — '
+                        'which is usually the reason for having two.'),
+                  ),
                 SettingsTile.navigation(
                   leading: const Icon(Icons.qr_code_2_rounded),
                   title: const Text('My contact code'),
@@ -368,7 +481,7 @@ class _AccountPageState extends State<AccountPage> {
                   value: Text(_name.isEmpty ? 'Not set' : _name),
                   onPressed: (_) => _editField(
                     title: 'Display name',
-                    prefKey: 'profile.name',
+                    prefKey: IdentityService.instance.scoped('profile.name'),
                     current: _name,
                     apply: (v) => _name = v,
                   ),
@@ -379,7 +492,7 @@ class _AccountPageState extends State<AccountPage> {
                   value: Text(_email.isEmpty ? 'Not set' : _email),
                   onPressed: (_) => _editField(
                     title: 'Email',
-                    prefKey: 'profile.email',
+                    prefKey: IdentityService.instance.scoped('profile.email'),
                     current: _email,
                     apply: (v) => _email = v,
                     keyboardType: TextInputType.emailAddress,
@@ -391,7 +504,7 @@ class _AccountPageState extends State<AccountPage> {
                   value: Text(_phone.isEmpty ? 'Not set' : _phone),
                   onPressed: (_) => _editField(
                     title: 'Phone',
-                    prefKey: 'profile.phone',
+                    prefKey: IdentityService.instance.scoped('profile.phone'),
                     current: _phone,
                     apply: (v) => _phone = v,
                     keyboardType: TextInputType.phone,
@@ -462,6 +575,26 @@ class _AccountPageState extends State<AccountPage> {
                   title: Text(l10n.stayConnected),
                   description: Text(l10n.stayConnectedHelp),
                 ),
+                // Only shown when it is actually a problem. Staying
+                // connected is a promise the app cannot keep on its own:
+                // the phone's battery saver will close it anyway, and this
+                // is the one switch that stops that.
+                if (_stayConnected && !_unrestricted)
+                  SettingsTile.navigation(
+                    leading: const Icon(Icons.battery_alert_rounded,
+                        color: Colors.orangeAccent),
+                    title: const Text('Allow running in the background'),
+                    description: const Text(
+                        'This phone\'s battery saver is allowed to close '
+                        'ChatNyto, and messages and calls stop arriving '
+                        'once it does. Tap to let it keep running.'),
+                    onPressed: (context) async {
+                      await BackgroundService.instance.requestUnrestricted();
+                      final ok =
+                          await BackgroundService.instance.unrestricted();
+                      if (mounted) setState(() => _unrestricted = ok);
+                    },
+                  ),
                 SettingsTile.navigation(
                   leading: const Icon(Icons.dns_rounded),
                   title: Text(l10n.networks),
@@ -496,8 +629,16 @@ class _AccountPageState extends State<AccountPage> {
                 SettingsTile.navigation(
                   leading: const Icon(Icons.music_note_rounded),
                   title: Text(l10n.notificationSound),
-                  value: Text(_sound.label),
-                  onPressed: (_) => _pickSound(),
+                  value: Text(_messageTone == null
+                      ? _sound.label
+                      : Ringtones.labelFor(_messageTone)),
+                  onPressed: (_) => _pickMessageSound(),
+                ),
+                SettingsTile.navigation(
+                  leading: const Icon(Icons.ring_volume_rounded),
+                  title: const Text('Call ringtone'),
+                  value: Text(Ringtones.labelFor(_callTone)),
+                  onPressed: (_) => _pickCallTone(),
                 ),
               ],
             ),

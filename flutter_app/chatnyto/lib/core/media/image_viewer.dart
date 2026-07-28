@@ -31,8 +31,61 @@ class ImageViewerPage extends StatefulWidget {
   State<ImageViewerPage> createState() => _ImageViewerPageState();
 }
 
-class _ImageViewerPageState extends State<ImageViewerPage> {
+class _ImageViewerPageState extends State<ImageViewerPage>
+    with SingleTickerProviderStateMixin {
   bool _busy = false;
+
+  /// Driven by both the pinch gesture and the double tap, so the two agree
+  /// on where the picture is.
+  final TransformationController _view = TransformationController();
+  late final AnimationController _zoomer = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 220),
+  );
+  Animation<Matrix4>? _zoom;
+
+  /// How far a double tap zooms in. Enough to read a screenshot, not so far
+  /// that the picture is lost off the edges.
+  static const _doubleTapScale = 3.0;
+
+  @override
+  void initState() {
+    super.initState();
+    _zoomer.addListener(() {
+      final zoom = _zoom;
+      if (zoom != null) _view.value = zoom.value;
+    });
+  }
+
+  @override
+  void dispose() {
+    _zoomer.dispose();
+    _view.dispose();
+    super.dispose();
+  }
+
+  /// Double tap zooms in on the point that was tapped, and a second one
+  /// goes back — the gesture people already use on every other photo they
+  /// have ever opened.
+  void _onDoubleTap(TapDownDetails details) {
+    final zoomedIn = _view.value.getMaxScaleOnAxis() > 1.01;
+    final Matrix4 target;
+    if (zoomedIn) {
+      target = Matrix4.identity();
+    } else {
+      // Scale about the tapped point, so what you aimed at is what fills
+      // the screen rather than the middle of the picture.
+      final point = details.localPosition;
+      target = Matrix4.identity()
+        ..translate(-point.dx * (_doubleTapScale - 1),
+            -point.dy * (_doubleTapScale - 1))
+        ..scale(_doubleTapScale);
+    }
+    _zoom = Matrix4Tween(begin: _view.value, end: target).animate(
+      CurvedAnimation(parent: _zoomer, curve: Curves.easeOutCubic),
+    );
+    _zoomer.forward(from: 0);
+  }
 
   String get _fileName =>
       'chatnyto-${DateTime.now().millisecondsSinceEpoch}.jpg';
@@ -142,10 +195,17 @@ class _ImageViewerPageState extends State<ImageViewerPage> {
       ),
       extendBodyBehindAppBar: true,
       body: Center(
-        child: InteractiveViewer(
-          minScale: 1,
-          maxScale: 6,
-          child: Image.memory(widget.bytes, fit: BoxFit.contain),
+        child: GestureDetector(
+          // onDoubleTapDown is what carries the position; onDoubleTap has to
+          // be present as well or the recogniser never claims the gesture.
+          onDoubleTapDown: _onDoubleTap,
+          onDoubleTap: () {},
+          child: InteractiveViewer(
+            transformationController: _view,
+            minScale: 1,
+            maxScale: 6,
+            child: Image.memory(widget.bytes, fit: BoxFit.contain),
+          ),
         ),
       ),
     );

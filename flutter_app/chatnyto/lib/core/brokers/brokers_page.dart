@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../calls/ice_directory.dart';
 import '../../l10n/app_localizations.dart';
 import '../widgets/liquid_glass.dart';
 import 'broker_credentials.dart';
@@ -179,14 +180,38 @@ class _BrokersPageState extends State<BrokersPage> {
 
     if (saved != true || hostController.text.trim().isEmpty) return;
 
-    var address = hostController.text.trim();
-    var name = nameController.text.trim();
-    var port = int.tryParse(portController.text.trim()) ?? 1883;
-    var username = userController.text.trim();
-    var password = passController.text;
+    final saveAs = await _resolve(
+      address: hostController.text.trim(),
+      name: nameController.text.trim(),
+      port: int.tryParse(portController.text.trim()) ?? 1883,
+      username: userController.text.trim(),
+      password: passController.text,
+    );
 
-    // Ask the server about itself, so a bare address is enough. Anything the
-    // user typed by hand wins over what the profile says.
+    if (existing != null) {
+      await _service.disconnect(existing);
+      await BrokerCredentials.instance.rename(existing.name, saveAs.name);
+      await _service.removeBrokerKeepingSignIn(existing);
+    }
+    await _service.addBroker(saveAs);
+    if (clearSignIn && !saveAs.hasLegacyCredentials) {
+      await BrokerCredentials.instance.forget(saveAs.name);
+    }
+  }
+
+  /// Turns whatever is known about a network into the entry to save.
+  ///
+  /// A published server answers for itself at
+  /// `https://<host>/.well-known/chatnyto.json`, so a bare address is a
+  /// complete answer: the name, port, sign-in and call servers all come
+  /// from there. Anything typed by hand wins over what the profile says.
+  Future<Broker> _resolve({
+    required String address,
+    required String name,
+    required int port,
+    required String username,
+    required String password,
+  }) async {
     if (username.isEmpty && password.isEmpty) {
       final profile = await NetworkDirectory.instance.lookup(address);
       if (profile != null) {
@@ -195,25 +220,16 @@ class _BrokersPageState extends State<BrokersPage> {
         if (profile.port != 0) port = profile.port;
         username = profile.username;
         password = profile.password;
+        await IceDirectory.instance.remember(name, profile.iceServers);
       }
     }
-    if (name.isEmpty) name = address;
-
-    if (existing != null) {
-      await _service.disconnect(existing);
-      await BrokerCredentials.instance.rename(existing.name, name);
-      await _service.removeBrokerKeepingSignIn(existing);
-    }
-    await _service.addBroker(Broker(
-      name: name,
+    return Broker(
+      name: name.isEmpty ? address : name,
       host: address,
       port: port,
       username: username,
       password: password,
-    ));
-    if (clearSignIn && username.isEmpty && password.isEmpty) {
-      await BrokerCredentials.instance.forget(name);
-    }
+    );
   }
 
   /// Long-press edit mode for a broker: edit its parameters or delete it.
@@ -264,15 +280,28 @@ class _BrokersPageState extends State<BrokersPage> {
   Future<void> _editBroker(Broker broker) =>
       _brokerDialog(existing: broker);
 
+  /// The switch is the user's choice, not the state of the wire.
+  ///
+  /// A network that is switched on but temporarily unreachable — the app has
+  /// just started, the WiFi has not come back, the server is rebooting — is
+  /// still a network the user wants. Showing it as off invites them to turn
+  /// it on again, which was never the problem, and made it look as though
+  /// the app forgot the setting every time it started.
   Future<void> _toggle(Broker broker) async {
+    final wasOn = broker.autoConnect;
     setState(() => _busy.add(broker.name));
-    if (_service.isConnected(broker)) {
+    await _service.setAutoConnect(broker, !wasOn);
+    if (wasOn) {
       await _service.disconnect(broker);
-      // Remember the choice: a network switched off stays off across
-      // restarts instead of being reconnected by the heartbeat.
-      await _service.setAutoConnect(broker, false);
     } else {
-      await _service.setAutoConnect(broker, true);
+      // Switching a network on while automatic connection is off would
+      // leave it on and never connected — which is how a network came to
+      // look as though it had to be re-enabled by hand on every start.
+      // Asking for a network is asking to be connected to it.
+      if (!_autoConnect) {
+        await _service.setAutoConnectEnabled(true);
+        if (mounted) setState(() => _autoConnect = true);
+      }
       final ok = await _service.connect(broker);
       if (!ok && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -286,12 +315,25 @@ class _BrokersPageState extends State<BrokersPage> {
   }
 
   /// Joins a network from somebody else's QR code.
+  ///
+  /// The code normally carries the address alone. That is enough for a
+  /// published network — the app asks the server itself for the sign-in, so
+  /// the person sharing never has to hand over a password, and the code is
+  /// safe to show to a room.
   Future<void> _scanQr() async {
-    final broker = await Navigator.push<Broker>(
+    final scanned = await Navigator.push<Broker>(
       context,
       GlassPageRoute(page: const BrokerScanPage()),
     );
-    if (broker == null || !mounted) return;
+    if (scanned == null || !mounted) return;
+    final broker = await _resolve(
+      address: scanned.host,
+      name: scanned.name,
+      port: scanned.port,
+      username: scanned.username,
+      password: scanned.password,
+    );
+    if (!mounted) return;
     await _service.addBroker(broker);
     final ok = await _service.connect(broker);
     if (!mounted) return;
@@ -327,13 +369,14 @@ class _BrokersPageState extends State<BrokersPage> {
   }
 
   Future<void> _addDiscovered(DiscoveredBroker discovered) async {
-    await _service.addBroker(Broker(
+    final broker = Broker(
       name: 'Network at ${discovered.host}',
       host: discovered.host,
       port: discovered.port,
-    ));
+    );
+    await _service.addBroker(broker);
     setState(() => _discovered.remove(discovered));
-    await _service.connect(_service.brokers.last);
+    await _service.connect(broker);
   }
 
   bool _matches(String text) =>
@@ -394,11 +437,20 @@ class _BrokersPageState extends State<BrokersPage> {
               child: Column(
                 children: [
                   SwitchListTile(
-                    secondary: const Icon(Icons.autorenew_rounded),
+                    secondary: Icon(
+                      Icons.autorenew_rounded,
+                      color: _autoConnect ? null : Colors.orangeAccent,
+                    ),
                     title: Text(l10n.connectAutomatically),
-                    subtitle: const Text(
-                        'Reconnect the networks you use as soon as they are '
-                        'reachable, and stay connected in the background.'),
+                    subtitle: Text(
+                      _autoConnect
+                          ? 'Reconnect the networks you use as soon as they '
+                              'are reachable, and stay connected in the '
+                              'background.'
+                          : 'Off: your networks stay disconnected until you '
+                              'switch each one on by hand, every time you '
+                              'open the app.',
+                    ),
                     value: _autoConnect,
                     onChanged: (value) async {
                       setState(() => _autoConnect = value);
@@ -449,42 +501,63 @@ class _BrokersPageState extends State<BrokersPage> {
                 ),
               ),
             for (final broker in brokers)
-              LiquidGlass(
-                margin: const EdgeInsets.symmetric(vertical: 6),
-                child: ListTile(
-                  onLongPress: () => _showBrokerOptions(broker),
-                  leading: Icon(
-                    _service.isConnected(broker)
-                        ? Icons.cloud_done_rounded
-                        : Icons.cloud_off_rounded,
-                    color: _service.isConnected(broker)
-                        ? Colors.greenAccent
-                        : null,
-                  ),
-                  title: Text(broker.name),
-                  subtitle: Text('${broker.host}:${broker.port}'),
-                  trailing: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      if (_busy.contains(broker.name))
-                        const SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      else
-                        Switch(
-                          value: _service.isConnected(broker),
-                          onChanged: (_) => _toggle(broker),
+              Builder(builder: (context) {
+                final connected = _service.isConnected(broker);
+                final wanted = broker.autoConnect;
+                return LiquidGlass(
+                  margin: const EdgeInsets.symmetric(vertical: 6),
+                  child: ListTile(
+                    onLongPress: () => _showBrokerOptions(broker),
+                    // The icon carries the live state, so the switch is free
+                    // to mean what the user asked for.
+                    leading: Icon(
+                      connected
+                          ? Icons.cloud_done_rounded
+                          : (wanted
+                              ? Icons.cloud_sync_rounded
+                              : Icons.cloud_off_rounded),
+                      color: connected
+                          ? Colors.greenAccent
+                          : (wanted ? Colors.orangeAccent : null),
+                    ),
+                    title: Text(broker.name),
+                    subtitle: Text(
+                      connected
+                          ? '${broker.host}:${broker.port} · connected'
+                          : (wanted
+                              // The master switch quietly overrules every
+                              // one of these. Saying so here is the
+                              // difference between "this network is coming
+                              // back" and "this network never will".
+                              ? '${broker.host}:${broker.port} · '
+                                  '${_autoConnect ? 'reconnecting when '
+                                      'reachable' : 'waiting — turn on '
+                                      'Connect automatically above'}'
+                              : '${broker.host}:${broker.port} · off'),
+                    ),
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (_busy.contains(broker.name))
+                          const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        else
+                          Switch(
+                            value: wanted,
+                            onChanged: (_) => _toggle(broker),
+                          ),
+                        IconButton(
+                          icon: const Icon(Icons.delete_outline_rounded),
+                          onPressed: () => _service.removeBroker(broker),
                         ),
-                      IconButton(
-                        icon: const Icon(Icons.delete_outline_rounded),
-                        onPressed: () => _service.removeBroker(broker),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
-                ),
-              ),
+                );
+              }),
             if (peers.isNotEmpty) ...[
               const Padding(
                 padding: EdgeInsets.fromLTRB(4, 16, 4, 4),

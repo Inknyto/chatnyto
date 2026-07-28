@@ -459,3 +459,147 @@ Done:     shipping a credential inside the binary — would have put it back in 
 Done: Not done, and needing you: ./deploy/deploy-remote.sh is still unrun. It now also
 Done: needs PUBLIC_HOST, APP_USER and APP_PASSWORD in deploy/.env.prod, and a second
 Done: Cloudflare route for /.well-known/*.
+Done: When you are offline(connected to a local broker without internet), or connected to the
+Done: broker via mobile data, the phone calls do not work. The phone rings, you answer, then get
+Done: (Connecting...) . Currently, the phone calls work only when I am connected to a broker that
+Done: is running on my vps. You have to make the phone calls work with or without internet, and
+Done: also make it work via mobile data when we are connected to the vps.
+Done: The messages work whatever the setup is. Sending images does not work on the esp32_broker,
+Done: but works on other local brokers(mosquitto).
+Done: You have to zoom in the images on double click, and zoom out when we double click again.
+Done: Add the possibility to view someone's profile picture.
+Done: Also, you should be able to return to the phone call view when a phone call is happening.
+Done: Currently, while on a call, you cannot go back to the call screen to change parameters or
+Done: hang.
+Done: In the networks page, you have to show the most recently connected brokers at the top.
+Done: The accounts data , contacts and access have to be separated(with the option to
+Done: share the data between accounts). Currently, when you switch accounts, the account data
+Done: present on the app is still the old account data. Which means one account can access another
+Done: account's data directly, which should not be possible.
+Done: Also, for the background connection, what I meant is, whenever the app is closed, you should
+Done: still be able to receive phone calls and messages. Currently, I still have to go to networks
+Done: and re-activate the previously activated networks whenever I close and reopen the app.
+Done: Wanted behaviour is that those networks should disconnect only when the button is toggled,
+Done: and messages and phone calls should arrive even when the phone is locked.
+Done: Add possibility to change the call and message ringtones to a local audio file.
+Done: Show the profile picture on all screens where the profile appears. Currently, in some views,
+Done: the account name only is present, with the placeholder profile picture.
+Done: Add contact management on the people page, and on the three dots menu at the top right.
+Done: Add message status (sent, received, read) via single/double grayed-out/blue
+Done: checkmarks(implement the existing checkmarks)(like whatsapp).
+Done: Is there a way to share broker information for another user to join our network with the
+Done: current app architecture, while making sure the credentials are not shared with it?
+Done: If you have questions, do not write the code yet. Ask them first. If you do not have
+Done: questions, write the complete code.
+Done: --- what was done for the batch above -------------------------------
+Done: Calls now take the best road they can find, in three steps. Direct, as
+Done: before, when the two devices share a network. Otherwise through STUN and
+Done: TURN servers the network publishes in its own profile, which is what was
+Done: missing over mobile data: with no STUN at all, a phone behind carrier NAT
+Done: never learns an address the other side could dial, so the call could
+Done: never connect — that is the "(Connecting...)" you saw. And when there is
+Done: still no route, the audio is encrypted and published on the same topic as
+Done: the messages: 8 kHz mono, IMA ADPCM, 60 ms frames, about 8 kB/s. It goes
+Done: wherever a message goes, which is the point. The switch-over happens 8
+Done: seconds after answering if the direct path has not come up, so a call
+Done: never sits on "Connecting…" again. deploy/ gained an optional coturn
+Done: container; set TURN_USER/TURN_PASSWORD/TURN_PUBLIC_IP to switch it on,
+Done: and open 3478/udp, 3478/tcp and 49160-49200/udp. Relaying is Android and
+Done: iOS only — the raw capture and playback plugins have no Linux build — so
+Done: a desktop still needs the direct path.
+Done: Images on the esp32_broker: the whole encrypted envelope went out as one
+Done: publish, and the Mongoose broker on the LoRa box grows its receive buffer
+Done: 512 bytes at a time out of a couple of hundred kilobytes of heap, so a
+Done: photo could not land there. Anything over 2 KB is now published as
+Done: numbered pieces and put back together by the receiver, with a pause
+Done: between them so a small broker's per-subscriber buffer is not overrun.
+Done: A message goes to every connected broker at once, so it is sized for the
+Done: smallest one.
+Done: Double tap zooms in on the point you tapped and again zooms back out.
+Done: Tapping a profile picture opens it full screen, with the same zoom, save
+Done: and share as a picture from a chat — including your own, so you can check
+Done: what other people see. Every avatar in the app is one widget now, so the
+Done: real picture shows in the people list, the chat header, the details
+Done: sheet, the call screen, the call history and the account list, instead of
+Done: an initial on a coloured disc.
+Done: A green bar across the top of the app while a call is running takes you
+Done: back to it, and the call screen has a way down into the app.
+Done: Networks are listed with what is connected first, then whatever was
+Done: connected most recently.
+Done: Account separation: the stores were already keyed per account, but each
+Done: also kept a copy in memory and that copy is what the screen showed —
+Done: which is why switching identity still showed the previous account's
+Done: things. Chats, contacts and call history are now dropped together on a
+Done: switch, and profile name, mail and number are scoped too. Contacts are
+Done: separate per identity by default, with a setting to share one address
+Done: book across them.
+Done: Ringtones: any audio file on the device, for calls and for messages. The
+Done: file is copied into the app rather than referenced where it sits, because
+Done: the picker's permission does not survive a restart. It is played by the
+Done: app and the notification goes out silent, since Android fixes a channel's
+Done: sound when the channel is made and cannot read a file that belongs to us.
+Done: Contacts: a page of its own from the three dots, and hold any row in the
+Done: People tab to message, rename (locally, only on this device), keep or
+Done: forget someone.
+Done: Ticks are real now: a clock while a message waits for a network, one tick
+Done: once a broker has it, two once the other device has answered for it, two
+Done: in blue once it has been read. Receipts are batched, so catching up after
+Done: being offline does not answer a burst with a burst. Groups show no ticks
+Done: at all — "delivered" has no single answer there, and a guess would be
+Done: worse than nothing.
+Done: Sharing a network without its credentials: yes, and that is now what the
+Done: QR code does by default. It carries the address alone; the joiner's app
+Done: asks the server itself at /.well-known/chatnyto.json and puts what comes
+Done: back straight into the keystore. The same payload is a link, so it can be
+Done: sent to someone who is not in the room. Including the sign-in in the code
+Done: is still possible, but it is a deliberate switch.
+Done: --- the freeze you reported ----------------------------------------
+Done: My fault, and fixed. I had changed the startup sweep to connect every
+Done: network at once instead of one after another. On a phone that has
+Done: collected a dozen networks over the months, most of them long gone, that
+Done: is a dozen simultaneous DNS lookups and sockets sitting there until they
+Done: time out — and mqtt_client's own reconnection kept working at clients
+Done: that had never connected in the first place. Now: three at a time with a
+Done: pause between batches, a 5 second connect timeout, no library-level
+Done: auto-reconnect, and a network that fails is backed off (a minute,
+Done: doubling to ten) instead of being retried every thirty seconds forever.
+Done: Coming back to the app clears the backoff. Two other things came out of
+Done: looking at this: the heartbeat, the lifecycle callback and the switch in
+Done: the UI could each open their own client for the same broker — the log
+Done: showed two connections a millisecond apart — and every delivery receipt
+Done: was decrypting a conversation's whole stored history, which for a chat
+Done: with pictures in it is megabytes. Both fixed.
+Done: --- why your networks kept needing to be switched on again -----------
+Done: Found on the phone, and it was not what it looked like. "Connect
+Done: automatically" at the top of the Networks page was off, and it silently
+Done: overrules every per-network switch: they all read as on, and none of them
+Done: connected. Three changes. The per-network switch now shows what you asked
+Done: for rather than whether the wire happens to be up, so a network that is
+Done: merely unreachable no longer reads as off. When automatic connection is
+Done: off, both the master row and every network below it say so. And switching
+Done: a network on turns automatic connection back on, because asking for a
+Done: network is asking to be connected to it — that state cannot happen again.
+Done: --- tests ------------------------------------------------------------
+Done: test/wire_test.dart covers the two new pieces of wire format that are
+Done: easy to get subtly wrong and impossible to eyeball: the codec's nibble
+Done: packing and sign extension, and reassembling a split message including
+Done: out of order, two at once, and malformed pieces. 10 tests, all passing.
+Done: The stock Flutter counter test was deleted — it came from the first
+Done: commit with its pumpWidget commented out and had never passed.
+Done: --- verified on the phones, and what was not -------------------------
+Done: On the two phones over ADB: no ANR on a cold start on either, the app
+Done: connects on its own once automatic connection is on, exactly one client
+Done: per broker now instead of two, the networks list sorts with the connected
+Done: one on top, the warning text appears when automatic connection is off,
+Done: Contacts is in the three dots menu, profile pictures show in the chat
+Done: list and the chat header, and the Add broker dialog still has no password
+Done: field. Not confirmed end to end on hardware this round: the ticks turning
+Done: blue, a photo over the LoRa box, and a relayed call — the second phone
+Done: kept dropping off USB and the first was down to 4% battery. The logic is
+Done: unit tested where it can be; the rest wants a session with both phones
+Done: charged.
+Done: --- needing you ------------------------------------------------------
+Done: ./deploy/deploy-remote.sh is still unrun by me. If you want calls to work
+Done: over mobile data through supa-tech.com rather than falling back to the
+Done: relay, add TURN_USER, TURN_PASSWORD and TURN_PUBLIC_IP to deploy/.env.prod
+Done: and open those three ports.

@@ -48,6 +48,44 @@ services:
       - ./wellknown:/usr/share/nginx/html/.well-known:ro
     # No `ports:` either; the tunnel routes /.well-known/ to it.
 
+  # Optional, and off unless asked for with `--profile turn`.
+  #
+  # Two people on the same WiFi call each other directly and need none of
+  # this. Two people on mobile data cannot: each phone sits behind the
+  # carrier's NAT with no address the other could dial. A TURN server is the
+  # meeting point that makes that call possible, and coturn is the standard
+  # one.
+  #
+  # It is the one part of this stack that cannot go through the tunnel: TURN
+  # is UDP, and an HTTP tunnel carries no UDP. So it publishes real ports,
+  # and they have to be open in the server's firewall — which is exactly why
+  # it is opt-in rather than on by default.
+  turn:
+    image: coturn/coturn:4.6
+    restart: unless-stopped
+    profiles: ["turn"]
+    # Host networking: coturn hands out the relay addresses it sees itself
+    # on, and behind Docker's NAT those are addresses nobody can reach.
+    network_mode: host
+    command:
+      - -n
+      - --no-cli
+      - --lt-cred-mech
+      - --fingerprint
+      - --realm=${PUBLIC_HOST}
+      - --listening-port=3478
+      - --min-port=49160
+      - --max-port=49200
+      - --user=${TURN_USER}:${TURN_PASSWORD}
+      - --external-ip=${TURN_PUBLIC_IP}
+      # A relay that will forward to anything is a relay someone else will
+      # use to reach places they should not.
+      - --no-multicast-peers
+      - --no-loopback-peers
+      - --denied-peer-ip=10.0.0.0-10.255.255.255
+      - --denied-peer-ip=172.16.0.0-172.31.255.255
+      - --denied-peer-ip=192.168.0.0-192.168.255.255
+
   tunnel:
     image: cloudflare/cloudflared:latest
     restart: unless-stopped

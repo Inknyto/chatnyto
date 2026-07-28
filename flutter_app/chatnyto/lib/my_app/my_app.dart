@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_quill/flutter_quill.dart';
 
+import '../calls/call_banner.dart';
 import '../calls/call_page.dart';
 import '../calls/call_service.dart';
 import '../core/brokers/broker_service.dart';
 import '../core/crypto/crypto_service.dart';
 import '../core/crypto/password_vault.dart';
+import '../core/notifications/background_service.dart';
 import '../core/notifications/notification_service.dart';
 import '../core/theme/app_theme.dart';
 import '../core/theme/glass_controller.dart';
@@ -52,14 +54,17 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   /// page is pushed from here rather than from any one screen.
   void _onCallChanged() {
     final calls = CallService.instance;
+    if (calls.state == CallState.ringing) _openCall();
+  }
+
+  /// Puts the call screen in front, from the ring or from the banner.
+  void _openCall() {
     final navigator = _navigatorKey.currentState;
-    if (navigator == null) return;
-    if (calls.state == CallState.ringing && !_callScreenOpen) {
-      _callScreenOpen = true;
-      navigator
-          .push(GlassPageRoute(page: const CallPage()))
-          .whenComplete(() => _callScreenOpen = false);
-    }
+    if (navigator == null || _callScreenOpen) return;
+    _callScreenOpen = true;
+    navigator
+        .push(GlassPageRoute(page: const CallPage()))
+        .whenComplete(() => _callScreenOpen = false);
   }
 
   /// The broker connections and their heartbeat are deliberately left
@@ -72,6 +77,15 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
         state == AppLifecycleState.resumed;
     if (state == AppLifecycleState.resumed &&
         IdentityService.instance.isUnlocked) {
+      // The service is what holds the process open. If the system took it
+      // away while we were gone, now is the moment to put it back, before
+      // anything else — otherwise the next trip to the background is the
+      // one where messages stop arriving.
+      BackgroundService.instance.startIfEnabled();
+      // Coming back to the app usually means something changed — a
+      // different WiFi, mobile data back on — so the networks that were
+      // backed off deserve another go straight away.
+      BrokerService.instance.retryNow();
       BrokerService.instance.autoConnectAll().then((_) async {
         await BrokerService.instance.advertiseEverywhere();
         await ChatService.instance.syncAll();
@@ -95,6 +109,13 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
             // null follows the phone's language.
             locale: locale,
             navigatorKey: _navigatorKey,
+            // Wrapped around the navigator rather than around one page, so
+            // an ongoing call stays reachable from every screen — including
+            // the ones pushed on top.
+            builder: (context, child) => CallBanner(
+              onTap: _openCall,
+              child: child ?? const SizedBox.shrink(),
+            ),
             supportedLocales: LocaleController.supported,
             localizationsDelegates: const [
               ...AppLocalizations.localizationsDelegates,

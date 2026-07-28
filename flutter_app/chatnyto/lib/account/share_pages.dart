@@ -8,6 +8,7 @@ import '../core/crypto/contact_book.dart';
 import '../core/crypto/crypto_service.dart';
 import '../core/media/image_service.dart';
 import '../core/widgets/liquid_glass.dart';
+import '../core/widgets/person_avatar.dart';
 
 /// A person as a link: `chatnyto://contact?...`.
 ///
@@ -108,18 +109,10 @@ class _MyContactPageState extends State<MyContactPage> {
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        CircleAvatar(
+                        PersonAvatar(
+                          name: me.name,
+                          avatar: me.avatar,
                           radius: 30,
-                          backgroundImage:
-                              picture == null ? null : MemoryImage(picture),
-                          child: picture != null
-                              ? null
-                              : Text(
-                                  me.name.isEmpty
-                                      ? '?'
-                                      : me.name[0].toUpperCase(),
-                                  style: const TextStyle(fontSize: 24),
-                                ),
                         ),
                         const SizedBox(height: 12),
                         Text(

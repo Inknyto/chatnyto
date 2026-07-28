@@ -11,6 +11,7 @@ class NetworkProfile {
     this.port = 0,
     this.username = '',
     this.password = '',
+    this.iceServers = const [],
   });
 
   /// Human name for the network, shown in the broker list.
@@ -24,6 +25,12 @@ class NetworkProfile {
 
   final String username;
   final String password;
+
+  /// STUN and TURN servers this network offers for voice calls, in the form
+  /// WebRTC expects: `{"urls": …, "username": …, "credential": …}`. A
+  /// network that runs one lets two people call each other from anywhere,
+  /// not only from the same WiFi.
+  final List<Map<String, dynamic>> iceServers;
 
   bool get needsSignIn => username.isNotEmpty || password.isNotEmpty;
 }
@@ -41,7 +48,9 @@ class NetworkProfile {
 ///   "name": "Supa Tech",
 ///   "url": "wss://supa-tech.com/mqtt",
 ///   "username": "chatnyto",
-///   "password": "…"
+///   "password": "…",
+///   "ice": [{"urls": "turn:supa-tech.com:3478", "username": "…",
+///            "credential": "…"}]
 /// }
 /// ```
 ///
@@ -76,6 +85,11 @@ class NetworkDirectory {
         port: (json['port'] as num?)?.toInt() ?? 0,
         username: json['username'] as String? ?? '',
         password: json['password'] as String? ?? '',
+        iceServers: (json['ice'] as List?)
+                ?.whereType<Map>()
+                .map((s) => Map<String, dynamic>.from(s))
+                .toList() ??
+            const [],
       );
     } catch (error) {
       // Offline, no such host, self-signed certificate, plain LAN broker:
