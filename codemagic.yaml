@@ -1,4 +1,4 @@
-# ~/Documents/git/chatnyto/codemagic.yaml 28 Jul 2026 at 03:33:38 PM
+# ~/Documents/git/chatnyto/codemagic.yaml 28 Jul 2026 at 06:51:43 PM
 workflows:
   ios-build-workflow:
     name: iOS Unsigned Build
@@ -23,26 +23,34 @@ workflows:
           flutter create . --platforms=ios
       - name: Patch iOS Deployment Target and Network Permissions
         script: |
-          # 1. Update Podfile minimum deployment target to iOS 13.0
+          # 1. Update Podfile minimum deployment target to iOS 13.0 via standard sed
           sed -i '' "s/platform :ios, '12.0'/platform :ios, '13.0'/g" ios/Podfile
           
-          # 2. Inject HTTP / Local Network exceptions into Info.plist safely using a temporary file
-          PLIST_PATH="ios/Runner/Info.plist"
-          
-          # Create the block of XML keys to inject
-          NETWORK_KEYS=$(cat << 'EOF'
-              <key>NSAppTransportSecurity</key>
-              <dict>
-                  <key>NSAllowsArbitraryLoads</key>
-                  <true/>
-              </dict>
-              <key>NSLocalNetworkUsageDescription</key>
-              <string>This application requires local network connectivity for development APIs.</string>
-          EOF
-          )
-          
-          # Insert the block directly right before the last closing </dict> tag in Info.plist
-          printf '%s\n' "g/<\/dict>/i" "$NETWORK_KEYS" "." "w" "q" | ed -s "$PLIST_PATH"
+          # 2. Inject Network exceptions before the very last </dict> block via a simple inline Ruby script
+          ruby -e '
+            file_path = "ios/Runner/Info.plist"
+            content = File.read(file_path)
+            
+            network_keys = <<-XML
+                <key>NSAppTransportSecurity</key>
+                <dict>
+                    <key>NSAllowsArbitraryLoads</key>
+                    <true/>
+                </dict>
+                <key>NSLocalNetworkUsageDescription</key>
+                <string>This application requires local network connectivity for development APIs.</string>
+            XML
+            
+            # Replaces the final closing dict tag with our keys followed by the tag
+            if content.include?("</dict>")
+              patched_content = content.rpartition("</dict>").insert(1, network_keys).join
+              File.write(file_path, patched_content)
+              puts "Successfully patched Info.plist with network keys"
+            else
+              puts "Error: </dict> tag not found in Info.plist"
+              exit 1
+            end
+          '
       - name: Install CocoaPods dependencies
         script: |
           cd ios && pod install
