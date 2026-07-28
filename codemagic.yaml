@@ -1,10 +1,10 @@
-# ~/Documents/git/chatnyto/codemagic.yaml 28 Jul 2026 at 02:25:39 PM
+# ~/Documents/git/chatnyto/codemagic.yaml 28 Jul 2026 at 02:30:06 PM
 workflows:
   ios-build-workflow:
     name: iOS Unsigned Build
     working_directory: flutter_app/chatnyto 
     max_build_duration: 60
-    instance_type: mac_mini_m2 # Fixed: Using the valid standard Apple Silicon M2 instance
+    instance_type: mac_mini_m2
     environment:
       flutter: stable
       xcode: latest
@@ -13,11 +13,15 @@ workflows:
       events:
         - push
       branch_patterns:
-        - pattern: 'revamp/whatsapp-ux' # Fixed: Replaced "target" with "pattern"
+        - pattern: 'revamp/whatsapp-ux'
     scripts:
       - name: Fetch Flutter dependencies
         script: |
           flutter packages pub get
+      - name: Auto-generate iOS Build Directory and Podfile
+        script: |
+          # Re-creates native metadata/Podfile structures if missing from Git
+          flutter create . --platforms=ios
       - name: Install CocoaPods dependencies
         script: |
           cd ios && pod install
