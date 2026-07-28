@@ -1,4 +1,4 @@
-# ~/Documents/git/chatnyto/codemagic.yaml 28 Jul 2026 at 02:30:06 PM
+# ~/Documents/git/chatnyto/codemagic.yaml 28 Jul 2026 at 02:37:43 PM
 workflows:
   ios-build-workflow:
     name: iOS Unsigned Build
@@ -18,10 +18,25 @@ workflows:
       - name: Fetch Flutter dependencies
         script: |
           flutter packages pub get
-      - name: Auto-generate iOS Build Directory and Podfile
+      - name: Auto-generate iOS Build Directory
         script: |
-          # Re-creates native metadata/Podfile structures if missing from Git
           flutter create . --platforms=ios
+      - name: Patch iOS Deployment Target and Network Permissions
+        script: |
+          # 1. Update Podfile minimum deployment target to iOS 13.0
+          sed -i '' "s/platform :ios, '12.0'/platform :ios, '13.0'/g" ios/Podfile
+          
+          # 2. Inject HTTP / Local Network exceptions into Info.plist before the final </dict> tags
+          PLIST_PATH="ios/Runner/Info.plist"
+          sed -i '' '/<\/dict>/e cat <<EOF' $PLIST_PATH
+              <key>NSAppTransportSecurity</key>
+              <dict>
+                  <key>NSAllowsArbitraryLoads</key>
+                  <true/>
+              </dict>
+              <key>NSLocalNetworkUsageDescription</key>
+              <string>This application requires local network connectivity for development APIs.</string>
+          EOF
       - name: Install CocoaPods dependencies
         script: |
           cd ios && pod install
