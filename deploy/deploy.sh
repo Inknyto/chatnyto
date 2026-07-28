@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ~/Documents/git/chatnyto/deploy/deploy.sh 27 Jul 2026 at 12:31:16 PM
+# ~/Documents/git/chatnyto/deploy/deploy.sh 28 Jul 2026 at 10:06:21 PM
 # Brings up the ChatNyto MQTT broker on the server.
 #
 # Runs ON the server (deploy-remote.sh calls it over SSH). It expects an env
@@ -108,7 +108,7 @@ echo "==> Starting the broker and the tunnel"
 # The TURN server only joins in when the env file asks for it — it is the one
 # piece that needs open ports rather than the tunnel.
 if [ -n "${TURN_USER:-}" ] && [ -n "${TURN_PASSWORD:-}" ]; then
-  : "${TURN_PUBLIC_IP:?Set TURN_PUBLIC_IP in $ENV_FILE (the server's public IP)}"
+  : "${TURN_PUBLIC_IP:?Set TURN_PUBLIC_IP in $ENV_FILE (the server\'s public IP)}"
   COMPOSE+=(--profile turn)
 fi
 "${COMPOSE[@]}" up -d --remove-orphans
