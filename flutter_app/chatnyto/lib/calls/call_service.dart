@@ -234,6 +234,7 @@ class CallService extends ChangeNotifier {
         'offerToReceiveVideo': false,
       });
       await _peer!.setLocalDescription(offer);
+      _localOffer = offer.sdp;
       await _send({'call': 'offer', 'sdp': offer.sdp});
     } catch (error) {
       await _finish(answered: false, reason: 'Could not start the call: $error');
@@ -245,8 +246,23 @@ class CallService extends ChangeNotifier {
         hangUp(reason: 'No answer');
       }
     });
+    // The offer goes out again every couple of seconds for as long as it
+    // rings. Two reasons. A lost packet no longer costs the whole call. And
+    // when the other phone had ChatNyto closed, what answers first is the
+    // service's own isolate, which can ring but not take a call: it puts the
+    // app in front, and the app needs the offer still to be arriving when it
+    // gets there. Signalling is tiny, so repeating it is cheap.
+    _offerTimer?.cancel();
+    _offerTimer = Timer.periodic(const Duration(seconds: 2), (_) {
+      if (_state != CallState.dialling) return;
+      _send({'call': 'offer', 'sdp': _localOffer});
+    });
     return null;
   }
+
+  /// Kept for as long as the call is being offered, so it can be repeated.
+  String? _localOffer;
+  Timer? _offerTimer;
 
   // ------------------------------------------------------------- incoming
 
@@ -314,8 +330,13 @@ class CallService extends ChangeNotifier {
 
     switch (kind) {
       case 'offer':
+        // The caller repeats its offer while it rings. A repeat of the call
+        // we are already ringing for is not a second call, and answering it
+        // with "busy" would hang up on the very person calling us.
+        if (inCall && _chat?.id == chat.id) return;
         if (inCall) {
-          // Already busy: tell the caller rather than leaving them ringing.
+          // Genuinely busy with somebody else: tell them rather than
+          // leaving them ringing.
           await _sendTo(chat, {'call': 'decline'});
           return;
         }
@@ -351,6 +372,8 @@ class CallService extends ChangeNotifier {
         _remoteDescriptionSet = true;
         await _drainCandidates();
         _ringTimer?.cancel();
+        _offerTimer?.cancel();
+        _offerTimer = null;
         _setState(CallState.connecting);
         _armDirectTimeout();
 
@@ -547,9 +570,12 @@ class CallService extends ChangeNotifier {
     _ringTimer?.cancel();
     _tick?.cancel();
     _directTimer?.cancel();
+    _offerTimer?.cancel();
     _ringTimer = null;
     _tick = null;
     _directTimer = null;
+    _offerTimer = null;
+    _localOffer = null;
     if (_relaying) {
       _relaying = false;
       VoiceRelay.instance.onFrame = null;

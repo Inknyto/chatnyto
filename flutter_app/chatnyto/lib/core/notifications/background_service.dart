@@ -1,8 +1,11 @@
 import 'dart:io';
+import 'dart:ui';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+import 'background_client.dart';
 
 /// Keeps ChatNyto receiving messages while it is not the app in front.
 ///
@@ -12,8 +15,12 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// broker connections and their heartbeat, which live in the main isolate)
 /// running, and makes it start again after a reboot.
 ///
-/// The service itself does no work: it exists to hold the process open. All
-/// the messaging logic stays where the app's state already is.
+/// While the app's process lives, that is all the service has to do: the
+/// app's own code keeps the connections and everything arrives as usual.
+/// Once the app is closed and the process is taken away, the service comes
+/// back in an isolate of its own where none of that state exists — so it
+/// becomes a small client itself, just enough to make the phone ring. See
+/// [BackgroundClient] for where that line is drawn and why.
 @pragma('vm:entry-point')
 void startBackgroundService() {
   FlutterForegroundTask.setTaskHandler(_KeepAliveHandler());
@@ -21,13 +28,27 @@ void startBackgroundService() {
 
 class _KeepAliveHandler extends TaskHandler {
   @override
-  Future<void> onStart(DateTime timestamp, TaskStarter starter) async {}
+  Future<void> onStart(DateTime timestamp, TaskStarter starter) async {
+    // A fresh isolate has no plugins registered until this is called, and
+    // without them there is no secure storage, so no keys, so nothing
+    // readable on any topic.
+    DartPluginRegistrant.ensureInitialized();
+    await BackgroundClient.instance.tick();
+  }
 
   @override
-  void onRepeatEvent(DateTime timestamp) {}
+  void onRepeatEvent(DateTime timestamp) {
+    BackgroundClient.instance.tick();
+  }
 
   @override
   Future<void> onDestroy(DateTime timestamp, bool isTimeout) async {}
+
+  /// Tapping the ring opens the app, which is the whole point of it.
+  @override
+  void onNotificationPressed() {
+    FlutterForegroundTask.launchApp();
+  }
 }
 
 class BackgroundService {
@@ -73,7 +94,10 @@ class BackgroundService {
         playSound: false,
       ),
       foregroundTaskOptions: ForegroundTaskOptions(
-        eventAction: ForegroundTaskEventAction.repeat(60000),
+        // Fifteen seconds, because this tick is what decides whether the app
+        // is still alive and whether the service has to take over listening.
+        // A minute of that decision being wrong is a minute of missed calls.
+        eventAction: ForegroundTaskEventAction.repeat(15000),
         autoRunOnBoot: true,
         autoRunOnMyPackageReplaced: true,
         allowWakeLock: true,

@@ -8,6 +8,7 @@ import '../core/crypto/contact_book.dart';
 import '../core/crypto/crypto_service.dart';
 import '../core/media/image_service.dart';
 import '../core/widgets/liquid_glass.dart';
+import '../core/widgets/paste_code.dart';
 import '../core/widgets/person_avatar.dart';
 
 /// A person as a link: `chatnyto://contact?...`.
@@ -207,7 +208,22 @@ class _ContactScanPageState extends State<ContactScanPage> {
         .map((b) => b.rawValue ?? '')
         .firstWhere((v) => v.isNotEmpty, orElse: () => '');
     if (raw.isEmpty) return;
+    await _accept(raw);
+  }
 
+  /// Asks for the code by hand, for a link that arrived in a message rather
+  /// than on somebody's screen — and for when the camera is not an option.
+  Future<void> _paste() async {
+    final raw = await askForCode(
+      context,
+      title: 'Add by link',
+      hint: 'chatnyto://contact?... or chatnyto://account?...',
+    );
+    if (raw == null || raw.isEmpty || !mounted) return;
+    await _accept(raw);
+  }
+
+  Future<void> _accept(String raw) async {
     final contact = ContactLink.decode(raw);
     if (contact != null) {
       _handled = true;
@@ -246,7 +262,16 @@ class _ContactScanPageState extends State<ContactScanPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Scan a code')),
+      appBar: AppBar(
+        title: const Text('Scan a code'),
+        actions: [
+          IconButton(
+            tooltip: 'Paste a link',
+            icon: const Icon(Icons.content_paste_rounded),
+            onPressed: _paste,
+          ),
+        ],
+      ),
       body: Stack(
         children: [
           MobileScanner(onDetect: _onDetect),
@@ -259,15 +284,25 @@ class _ContactScanPageState extends State<ContactScanPage> {
                 margin: const EdgeInsets.symmetric(horizontal: 32),
                 padding:
                     const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                child: Text(
-                  _error ??
-                      'Point the camera at a contact code or an account '
-                          'transfer code.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: _error == null ? null : Colors.redAccent,
-                  ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      _error ??
+                          'Point the camera at a contact code or an account '
+                              'transfer code.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: _error == null ? null : Colors.redAccent,
+                      ),
+                    ),
+                    TextButton.icon(
+                      onPressed: _paste,
+                      icon: const Icon(Icons.link_rounded, size: 18),
+                      label: const Text('Use a link instead'),
+                    ),
+                  ],
                 ),
               ),
             ),

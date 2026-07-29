@@ -603,3 +603,68 @@ Done: ./deploy/deploy-remote.sh is still unrun by me. If you want calls to work
 Done: over mobile data through supa-tech.com rather than falling back to the
 Done: relay, add TURN_USER, TURN_PASSWORD and TURN_PUBLIC_IP to deploy/.env.prod
 Done: and open those three ports.
+Done: On the qr code connection, why did you remove the other method? Restore it.
+Done: When the app is open, or running in the background, it successfully receives phone calls. 
+Done: But when the app is closed, it does not receive the phone calls anymore. You have to make
+Done: the app able to receive phone calls right away when you are connected to a broker, like
+Done: whatsapp, without the need for the app to be actively running, or running in the background.
+Done: You have to genrate complete diagrams for the app's architecture and data flow. This is a one off, do not
+Done: regenerate when things change, only when I ask it. The diagrams are for better understanding
+Done: the app's internals 
+Done: --- the QR code's other method ----------------------------------
+Done: You were right that something was missing, though not quite where I
+Done: expected: I had added "Share link" and "Copy" to the code page without
+Done: adding any way to *use* a link. The scanner was camera-only, so a link
+Done: sent to somebody was a dead end. Both scanners — networks, and contacts
+Done: or account transfers — now take a pasted or typed code as well, from the
+Done: bar at the top or the button under the viewfinder, and the clipboard is
+Done: read for you if it already holds a chatnyto:// link. It is also the way
+Done: in when the camera is not: no permission, no camera on a desktop, or a
+Done: screen too dim to read a code off. If you meant something else by the
+Done: other method, say which and I will put that back too.
+Done: --- calls with the app closed ----------------------------------------
+Done: The foreground service was only holding the process open, so everything
+Done: worked while the app's own code was alive and nothing did once Android
+Done: took the process away: the service comes back in an isolate of its own
+Done: where none of the app's state exists, and a ring arriving then had
+Done: nobody listening. The service's isolate is now a small client itself.
+Done: It is deliberately less than the app, in two ways that matter:
+Done:   * It stores nothing. Two isolates writing the same preferences file is
+Done:     how message history gets lost, and that would be a worse bug than
+Done:     the one being fixed. When you open the app, its sync protocol asks
+Done:     the other side to replay whatever was missed — which is what that
+Done:     protocol has always been for.
+Done:   * It does not answer calls. Answering needs a microphone, a screen and
+Done:     the whole call machinery. It rings instead, full screen over the lock
+Done:     screen with your own ringtone, and that brings the app up.
+Done: The piece that makes the handover work: the caller now repeats its offer
+Done: every two seconds while it rings. So the app arrives to find the call
+Done: still waiting rather than a ring that has already been consumed. That
+Done: also means a lost signalling packet no longer costs the whole call. The
+Done: callee ignores a repeat of the call it is already ringing for — without
+Done: that it would answer its own caller with "busy".
+Done: Only one isolate listens at a time or every message would notify twice:
+Done: the app stamps a timestamp every ten seconds, the service reads it every
+Done: fifteen, and takes over when it is more than forty seconds old. Closing
+Done: the app writes zero, so the takeover is immediate rather than waiting
+Done: out that window.
+Done: One thing this cannot fix by itself: manufacturer battery saving will
+Done: close a backgrounded app whatever a foreground service says. The
+Done: exemption prompt in Settings is what actually settles it, and it only
+Done: appears when your phone has not granted it.
+Done: --- diagrams ---------------------------------------------------------
+Done: docs/architecture.md — sixteen diagrams: the layer map, the topics and
+Done: envelope kinds, sending and receiving a message, the sync protocol, key
+Done: derivation, the account model and its state machine, the call's three
+Done: media paths, the two-isolate handover, joining a network, the storage
+Done: map, the server side and the AI side. Every diagram has a short note on
+Done: why the design is that way, including the bugs that shaped it. Written
+Done: from the code as it stands and, as you asked, a one-off: it will not be
+Done: regenerated when things change unless you ask.
+Done: --- verified, and not ------------------------------------------------
+Done: 20 unit tests pass (the voice codec, message chunking, and the takeover
+Done: decision including a clock that moved backwards); analyze is clean; the
+Done: APK builds. Not verified on hardware: both phones were off USB by the
+Done: time this was finished — the Samsung had run down to 4% — so the closed
+Done: app ringing has not been watched happening on a real phone yet. That is
+Done: the one thing here that only a phone can confirm.

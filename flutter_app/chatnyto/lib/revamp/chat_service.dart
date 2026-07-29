@@ -9,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/brokers/broker_service.dart';
 import '../core/crypto/crypto_service.dart';
+import '../core/notifications/background_client.dart';
 import '../core/notifications/notification_service.dart';
 
 /// One conversation: a direct message with a verified person, or a named
@@ -961,6 +962,76 @@ class ChatService extends ChangeNotifier {
           jsonEncode(message.toJson()), key);
       BrokerService.instance.publishToAll(chat.topic, envelope);
     }
+  }
+
+  /// Reads something off the wire without changing anything.
+  ///
+  /// Used by the service's own isolate, which listens while the app is
+  /// closed. It shares this method rather than a copy of the decryption so
+  /// the two can never disagree about what a ring looks like — but it stops
+  /// short of [_append]: nothing is stored, no chat is created, no receipt
+  /// is sent. Two isolates writing the same preferences file is how history
+  /// gets lost, and the app's sync protocol collects whatever was missed the
+  /// moment it opens.
+  Future<BackgroundRead?> readForBackground(
+      String topic, String payload) async {
+    if (!_initialized) {
+      // Chats are needed to know which topic belongs to whom, but only read.
+      final prefs = await SharedPreferences.getInstance();
+      if (_chats.isEmpty) {
+        _chats.addAll((prefs.getStringList(_chatsKey) ?? []).map(
+            (s) => ChatEntry.fromJson(jsonDecode(s) as Map<String, dynamic>)));
+      }
+    }
+    final chat = _chats.where((c) => c.topic == topic).firstOrNull;
+    if (chat == null) return null;
+    final key = await _keyFor(chat);
+    if (key == null) return null;
+    final clear = await MessageCrypto.decryptEnvelope(payload, key);
+    if (clear == null) return null;
+    final data = decodeBody(clear);
+    if (data == null) return null;
+
+    final me = await _fingerprint();
+    final from = data['from'] as String? ?? data['f'] as String? ?? '';
+    // Our own traffic comes back from the broker on the same topic.
+    if (from.isNotEmpty && from == me) return null;
+
+    if (isCallEnvelope(data)) {
+      final kind = data['call'] as String?;
+      if (kind == 'offer') {
+        return BackgroundRead(
+          kind: BackgroundReadKind.incomingCall,
+          chatId: chat.id,
+          chatTitle: chat.title,
+          from: from,
+        );
+      }
+      if (kind == 'end' || kind == 'decline') {
+        return BackgroundRead(
+          kind: BackgroundReadKind.callEnded,
+          chatId: chat.id,
+          chatTitle: chat.title,
+          from: from,
+        );
+      }
+      // Answers, ICE and relayed audio are the app's business, not ours.
+      return null;
+    }
+    if (isPlumbingEnvelope(data)) return null;
+
+    final message = RevampMessage.fromJson(data);
+    if (message == null) return null;
+    return BackgroundRead(
+      kind: BackgroundReadKind.message,
+      chatId: chat.id,
+      chatTitle: chat.title,
+      from: from,
+      senderName: chat.isDm ? '' : message.name,
+      preview: message.hasImage && message.text.isEmpty
+          ? 'Photo'
+          : message.text,
+    );
   }
 
   Future<void> _onIncoming(String topic, String payload) async {

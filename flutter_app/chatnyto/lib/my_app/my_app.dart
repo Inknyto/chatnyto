@@ -7,6 +7,7 @@ import '../calls/call_service.dart';
 import '../core/brokers/broker_service.dart';
 import '../core/crypto/crypto_service.dart';
 import '../core/crypto/password_vault.dart';
+import '../core/notifications/background_client.dart';
 import '../core/notifications/background_service.dart';
 import '../core/notifications/notification_service.dart';
 import '../core/theme/app_theme.dart';
@@ -38,6 +39,9 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     CallService.instance.init();
     CallService.instance.addListener(_onCallChanged);
+    // Tells the foreground service's own isolate that the app is here, so it
+    // does not also connect and notify everything twice.
+    UiPresence.instance.start();
     ThemeController.instance.load();
     GlassController.instance.load();
     LocaleController.instance.load();
@@ -46,6 +50,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   @override
   void dispose() {
     CallService.instance.removeListener(_onCallChanged);
+    UiPresence.instance.stop();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -75,6 +80,14 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     NotificationService.instance.appInForeground =
         state == AppLifecycleState.resumed;
+    // Being detached is the app going away for good. Clearing the stamp lets
+    // the service take over listening on its next tick rather than waiting
+    // for it to go stale, so a call arriving seconds later still rings.
+    if (state == AppLifecycleState.detached) {
+      UiPresence.instance.stamp(leaving: true);
+    } else {
+      UiPresence.instance.stamp();
+    }
     if (state == AppLifecycleState.resumed &&
         IdentityService.instance.isUnlocked) {
       // The service is what holds the process open. If the system took it

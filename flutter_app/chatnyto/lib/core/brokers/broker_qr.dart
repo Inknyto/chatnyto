@@ -5,6 +5,7 @@ import 'package:qr_flutter/qr_flutter.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../widgets/liquid_glass.dart';
+import '../widgets/paste_code.dart';
 import 'broker_credentials.dart';
 import 'broker_service.dart';
 
@@ -212,6 +213,7 @@ class BrokerScanPage extends StatefulWidget {
 class _BrokerScanPageState extends State<BrokerScanPage> {
   final MobileScannerController _controller = MobileScannerController();
   bool _handled = false;
+  String? _error;
 
   @override
   void dispose() {
@@ -224,19 +226,44 @@ class _BrokerScanPageState extends State<BrokerScanPage> {
     for (final barcode in capture.barcodes) {
       final value = barcode.rawValue;
       if (value == null) continue;
-      final broker = BrokerQr.decode(value);
-      if (broker != null) {
-        _handled = true;
-        Navigator.pop(context, broker);
-        return;
-      }
+      if (_accept(value)) return;
+    }
+  }
+
+  /// Takes a code from wherever it came from — the camera or the clipboard.
+  bool _accept(String raw) {
+    final broker = BrokerQr.decode(raw);
+    if (broker == null) return false;
+    _handled = true;
+    Navigator.pop(context, broker);
+    return true;
+  }
+
+  Future<void> _paste() async {
+    final raw = await askForCode(
+      context,
+      title: 'Join by link',
+      hint: 'chatnyto://broker?...',
+    );
+    if (raw == null || raw.isEmpty || !mounted) return;
+    if (!_accept(raw)) {
+      setState(() => _error = 'That is not a ChatNyto network link.');
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Scan a network code')),
+      appBar: AppBar(
+        title: const Text('Scan a network code'),
+        actions: [
+          IconButton(
+            tooltip: 'Paste a link',
+            icon: const Icon(Icons.content_paste_rounded),
+            onPressed: _paste,
+          ),
+        ],
+      ),
       body: Stack(
         children: [
           MobileScanner(controller: _controller, onDetect: _onDetect),
@@ -245,9 +272,25 @@ class _BrokerScanPageState extends State<BrokerScanPage> {
             child: LiquidGlass(
               margin: const EdgeInsets.all(24),
               padding: const EdgeInsets.all(16),
-              child: const Text(
-                'Point the camera at a ChatNyto network code.',
-                textAlign: TextAlign.center,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    _error ?? 'Point the camera at a ChatNyto network code.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: _error == null ? null : Colors.redAccent,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  // Not everybody is in the room, and not every camera
+                  // works. The link is the same code in another form.
+                  TextButton.icon(
+                    onPressed: _paste,
+                    icon: const Icon(Icons.link_rounded, size: 18),
+                    label: const Text('Use a link instead'),
+                  ),
+                ],
               ),
             ),
           ),

@@ -204,7 +204,12 @@ class NotificationService {
   /// Rings for an incoming call: an insistent, full-screen notification that
   /// keeps sounding until it is answered or declined — a call has to be able
   /// to interrupt, which is the one place a quiet notification is wrong.
-  Future<void> showIncomingCall(String caller) async {
+  /// [withActions] is off when the ring comes from the service's own
+  /// isolate: it has no call set up and could not answer one, so it offers
+  /// no Answer button. The full-screen intent brings the app up instead, and
+  /// the app answers — the caller is still repeating its offer.
+  Future<void> showIncomingCall(String caller,
+      {bool withActions = true}) async {
     await init();
     if (!_available) return;
     // Same reasoning as for messages: a ringtone of the user's own is played
@@ -236,12 +241,14 @@ class NotificationService {
                 Int64List.fromList(<int>[0, 700, 600, 700, 600, 700]),
             // FLAG_INSISTENT: loop the tone rather than playing it once.
             additionalFlags: Int32List.fromList(<int>[4]),
-            actions: const <AndroidNotificationAction>[
-              AndroidNotificationAction('answer', 'Answer',
-                  showsUserInterface: true),
-              AndroidNotificationAction('decline', 'Decline',
-                  cancelNotification: true),
-            ],
+            actions: withActions
+                ? const <AndroidNotificationAction>[
+                    AndroidNotificationAction('answer', 'Answer',
+                        showsUserInterface: true),
+                    AndroidNotificationAction('decline', 'Decline',
+                        cancelNotification: true),
+                  ]
+                : const <AndroidNotificationAction>[],
           ),
           iOS: const DarwinNotificationDetails(
             interruptionLevel: InterruptionLevel.timeSensitive,
