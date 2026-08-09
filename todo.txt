@@ -885,3 +885,81 @@ Done: hardware — the phones are yours to test with from here.
 Done: Still open from before: the app uses about 44% of a core sitting idle
 Done: after the Ed25519 caching, and the second thing spinning has not been
 Done: found.
+Done: Currently, only one of the callers' video is working. All callers have to be able to show their
+Done: video. Implement group voice and video call, with highlight indication for who is currently
+Done: talking.
+Done: Implement termux's adb and shizuku for using adb with the phone for the android tvs, and
+Done: implement remote and usb debugging for other phones and pcs from one or more adb connections.
+Done: --- why only one caller's video worked -------------------------------
+Done: The same m-line matching rule, one level deeper. JSEP 5.10 says that
+Done: when a remote offer arrives, only transceivers created by *addTrack*
+Done: may be associated with its m= sections. The video transceiver was made
+Done: with addTransceiver on both sides, so on the answering side it was
+Done: passed over entirely and libwebrtc built a second, recvonly one for the
+Done: caller's video. The answerer was left holding a sender belonging to no
+Done: m= line at all: it could see the caller's camera and could never send
+Done: its own, however many tracks were handed to that sender. Only the
+Done: offering side creates the transceiver now; the answering side adopts
+Done: the one the offer brings, turns it round to sendrecv and sets its
+Done: stream — all before the answer is written, because an answer cannot add
+Done: an m= line and cannot promise to send on one it has just called
+Done: receive-only.
+Done: --- group calls ------------------------------------------------------
+Done: A mesh, because there is no server to fan streams out: everybody holds
+Done: a connection to everybody, and each device encodes its picture once per
+Done: person. That is a real limit rather than a preference, so the room caps
+Done: at six. Signalling rides the group's own encrypted topic, with every
+Done: message naming who it is from and who it is for.
+Done: A call is a room, not a ring. The first person in announces themselves
+Done: to an empty room; everybody after that announces themselves to whoever
+Done: answers. People arrive and leave while it runs, and one connection
+Done: failing drops one person rather than the call — the one thing a mesh is
+Done: better at than a server.
+Done: Who offers is decided by comparing fingerprints. Both sides learn of
+Done: each other in the same instant, so "whoever noticed first" is not a rule
+Done: either could apply, and both offering at once leaves two half-built
+Done: connections and no call.
+Done: Who is talking comes from WebRTC's own audio levels, read where the
+Done: sound is received — the only honest place, since nobody has to be
+Done: trusted to report their own volume. Held for 1.2s so the ring does not
+Done: blink between words. Our own level is read from the same report so the
+Done: comparison means something.
+Done: Grid of tiles rather than one big speaker: no server decided who is
+Done: important here, and a layout that promoted somebody would be inventing
+Done: an authority that does not exist.
+Done: --- adb ---------------------------------------------------------------
+Done: The protocol is spoken directly, in Dart, over TCP. The Android TV
+Done: remote used to shell out to the adb binary and tell phone users to go
+Done: and find a computer — for a remote control. Now a phone drives a
+Done: television with nothing installed on either.
+Done: adbd authenticates every connection with a challenge signed by an
+Done: RSA-2048 key, so the app holds one. Generated once, on a background
+Done: isolate (pure-Dart RSA takes seconds, and seconds on the main isolate
+Done: is an ANR), and kept — it is what "always allow" is remembering. There
+Done: is a button to forget it, which is how a user revokes what they granted.
+Done: The public key goes in Android's own 524-byte structure, not any
+Done: standard encoding: modulus little-endian plus two values precomputed
+Done: for a verifier with no bignum library. That arithmetic is the highest
+Done: risk in the whole feature, because adbd's only answer to a malformed
+Done: key is to ask for the token again — which looks exactly like a key it
+Done: has never seen. It is tested against its own definitions.
+Done: A computer is a different thing entirely: it runs an adb *server* on
+Done: 5037 speaking a text protocol with no authentication, so that is a
+Done: second client. What it buys is every device that computer can see, from
+Done: the phone — including ones on its USB ports.
+Done: Shizuku runs shell commands with adb's authority on this phone itself,
+Done: with no computer in the room. Termux lends its real adb binary, which
+Done: is the only way to reach hardware plugged into this phone's socket — an
+Done: app cannot have the USB host stack. Both are optional and both say
+Done: which piece is missing rather than failing silently.
+Done: Two bugs found while writing this and fixed: the handshake subscribed
+Done: to a broadcast stream after sending, which loses the challenge on a fast
+Done: network and wins on a slow one; and NUL terminators had landed in the
+Done: source as raw bytes rather than escapes.
+Done: --- verified, and not ------------------------------------------------
+Done: 109 unit tests pass; analyze unchanged at the 48 pre-existing style
+Done: infos. None of this has been on hardware. The Kotlin bridge has never
+Done: been compiled — it adds a Gradle dependency (dev.rikka.shizuku), a
+Done: manifest provider and two permissions, so the first build after this is
+Done: the one to watch.
+Done: Still open: about 44% of a core at idle, cause not found.

@@ -3,11 +3,13 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/brokers/broker_service.dart';
 import '../calls/call_service.dart';
+import '../calls/group_call_service.dart';
 import '../core/crypto/contact_book.dart';
 import '../core/crypto/crypto_service.dart';
 import '../core/crypto/password_vault.dart';
 import '../core/notifications/background_service.dart';
 import '../core/notifications/notification_service.dart';
+import '../devices/adb/adb_targets.dart';
 import '../devices/device_service.dart';
 import '../core/widgets/liquid_glass.dart';
 import '../core/widgets/person_avatar.dart';
@@ -446,6 +448,7 @@ Future<void> _startServices() async {
   await ChatService.instance.init();
   await ContactBook.instance.load();
   await CallService.instance.init();
+  GroupCallService.instance.init();
   // Loaded at start, not when the IoT screen is opened: a device's readings
   // only exist while something is subscribed to them, and a temperature
   // that has been arriving all day should be there the moment you look.
@@ -474,5 +477,7 @@ void forgetAccountState() {
   ChatService.instance.reset();
   ContactBook.instance.reset();
   CallService.instance.reset();
+  GroupCallService.instance.reset();
   DeviceService.instance.reset();
+  AdbTargets.instance.reset();
 }

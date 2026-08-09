@@ -1283,6 +1283,14 @@ class ChatService extends ChangeNotifier {
   Future<void> Function(ChatEntry chat, Map<String, dynamic> data)?
       onCallSignal;
 
+  /// The same, for a group. A different service handles it because the two
+  /// are genuinely different things: a one-to-one call rings somebody and
+  /// falls back to the broker when no direct route exists, while a group
+  /// call is a room people are in or are not, holding one connection per
+  /// person.
+  Future<void> Function(ChatEntry chat, Map<String, dynamic> data)?
+      onGroupCallSignal;
+
   /// Sends call signalling (ring, answer, ICE, hang up) over [chat]'s
   /// end-to-end encrypted channel. Never queued in the outbox: a call is
   /// only meaningful while both sides are online.
@@ -1404,6 +1412,20 @@ class ChatService extends ChangeNotifier {
 
     if (isCallEnvelope(data)) {
       final kind = data['call'] as String?;
+      // A group call is not a ring. Somebody joining a room is worth a
+      // notification, not a full-screen incoming call and a ringtone — a
+      // group of eight would otherwise take over eight phones at once,
+      // several of which are in pockets.
+      if (kind == 'join' && !chat.isDm) {
+        if (chat.muted) return null;
+        return BackgroundRead(
+          kind: BackgroundReadKind.message,
+          chatId: chat.id,
+          chatTitle: chat.title,
+          from: from,
+          preview: 'There is a call in this group',
+        );
+      }
       if (kind == 'offer') {
         return BackgroundRead(
           kind: BackgroundReadKind.incomingCall,
@@ -1489,7 +1511,11 @@ class ChatService extends ChangeNotifier {
       // from the broker on the same topic: ignore it, or the caller rings
       // itself, finds itself busy, and declines its own call.
       if (data['from'] == await _fingerprint()) return;
-      await onCallSignal?.call(chat, data);
+      if (chat.isDm) {
+        await onCallSignal?.call(chat, data);
+      } else {
+        await onGroupCallSignal?.call(chat, data);
+      }
       return;
     }
     if (data['type'] == 'receipt') {

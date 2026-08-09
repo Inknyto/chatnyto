@@ -19,6 +19,7 @@ import '../core/widgets/connection_status.dart';
 import '../core/widgets/liquid_glass.dart';
 import '../core/widgets/person_avatar.dart';
 import '../core/widgets/wa_components.dart';
+import '../devices/adb_page.dart';
 import '../devices/devices_page.dart';
 import '../humans/contacts_page.dart';
 import '../humans/humans_page.dart';
@@ -1081,6 +1082,12 @@ class CommunitiesTab extends StatelessWidget {
           AppLocalizations.of(context).communityAi,
           AppLocalizations.of(context).communityAiSub,
           const AiAgentsPage(),
+        ),
+        tile(
+          Icons.developer_mode_rounded,
+          'Debugging bridge',
+          'adb over the network, through a computer, or on this phone',
+          const AdbPage(),
         ),
         const Padding(
           padding: EdgeInsets.fromLTRB(16, 18, 16, 6),

@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
+import 'adb/adb_client.dart';
 import 'device.dart';
 
 /// What happened when a key was sent.
@@ -397,33 +398,66 @@ class TvRemote {
     RemoteKey.exit: 4,
   };
 
+  /// Live adb connections, one per television, kept between key presses.
+  ///
+  /// The handshake costs an RSA signature and a round trip; doing it for
+  /// every press would make the remote feel broken. A connection that has
+  /// died is dropped and rebuilt on the next press.
+  final Map<String, AdbClient> _adb = {};
+
   /// Android TV over adb.
   ///
-  /// Deliberately the last resort of the four: it needs debugging turned on
-  /// in the television's developer options, and the phone has to have an adb
-  /// server it can talk to. Where that is not true the message says so
-  /// rather than timing out silently.
+  /// It used to shell out to the `adb` binary, which meant it worked from
+  /// the desktop app and told phone users to go and find a computer — for a
+  /// remote control, which is the one thing nobody wants to need a computer
+  /// for. The protocol is spoken directly now (see [AdbClient]), so a phone
+  /// can drive a television with nothing installed on either.
+  ///
+  /// It still needs network debugging turned on in the television's
+  /// developer options, and the first connection puts a dialog on the
+  /// television asking whether to allow it. Both of those are the
+  /// television's own decisions and there is no way round them — so the
+  /// message says exactly that rather than timing out silently.
   Future<RemoteResult> _androidTv(Device device, RemoteKey key) async {
     final code = _androidKeys[key];
     if (code == null) return const RemoteResult.failed('No such key.');
-    if (!Platform.isLinux && !Platform.isMacOS && !Platform.isWindows) {
-      return const RemoteResult.failed(
-          'Android TV control needs adb, which phones do not have. Use it '
-          'from the desktop app.');
-    }
     final port = device.port == 0 ? 5555 : device.port;
+    final id = '${device.address}:$port';
+
+    var client = _adb[id];
+    if (client != null && !client.isOpen) {
+      _adb.remove(id);
+      client = null;
+    }
+    if (client == null) {
+      final (result, fresh) = await AdbClient.connect(device.address, port: port);
+      switch (result.status) {
+        case AdbStatus.connected:
+          _adb[id] = client = fresh!;
+        case AdbStatus.awaitingApproval:
+          return RemoteResult.failed(result.detail);
+        case AdbStatus.unreachable:
+          return const RemoteResult.failed(
+              'The television did not answer. Network debugging has to be on '
+              'in its developer options.');
+        case AdbStatus.refused:
+          return const RemoteResult.failed(
+              'Something is on that address, but it is not an Android TV.');
+      }
+    }
+
     try {
-      await Process.run('adb', ['connect', '${device.address}:$port'])
-          .timeout(_timeout);
-      final result = await Process.run(
-        'adb',
-        ['-s', '${device.address}:$port', 'shell', 'input', 'keyevent', '$code'],
-      ).timeout(_timeout);
-      return result.exitCode == 0
-          ? const RemoteResult.ok()
-          : RemoteResult.failed('adb said: ${result.stderr}');
-    } on ProcessException {
-      return const RemoteResult.failed('adb is not installed on this machine.');
+      final output = await client.keyEvent(code);
+      // adbd reports a rejected command by printing to the same stream, so
+      // the only sign of trouble is what came back.
+      if (output.contains('not found') || output.contains('Error')) {
+        return RemoteResult.failed(output.trim());
+      }
+      return const RemoteResult.ok();
+    } catch (error) {
+      await client.close();
+      _adb.remove(id);
+      return RemoteResult.failed('The television stopped answering: $error');
     }
   }
 

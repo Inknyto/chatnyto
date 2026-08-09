@@ -156,10 +156,13 @@ class CallService extends ChangeNotifier {
   /// screen show video instead of an avatar.
   bool get videoCall => _cameraOn || _peerCameraOn;
 
-  /// Whether turning the camera on is possible at all right now. It is not
-  /// once a call has fallen back to the broker: that path carries compressed
-  /// voice and nothing else.
-  bool get canUseCamera => inCall && !_relaying;
+  /// Whether turning the camera on is possible at all right now.
+  ///
+  /// Not once a call has fallen back to the broker: that path carries
+  /// compressed voice and nothing else. And not without a sender to hand the
+  /// track to — otherwise the camera light would come on and show the user a
+  /// preview of a picture going nowhere.
+  bool get canUseCamera => inCall && !_relaying && _videoSender != null;
 
   /// Where the media path has got to, for the call screen's status line.
   String get iceState => _iceState;
@@ -269,7 +272,7 @@ class CallService extends ChangeNotifier {
     _setState(CallState.dialling);
 
     try {
-      await _startMedia();
+      await _startMedia(offering: true);
       if (withVideo) await setCamera(true, tellPeer: false);
       final offer = await _peer!.createOffer({
         'offerToReceiveAudio': true,
@@ -478,10 +481,11 @@ class CallService extends ChangeNotifier {
         _outgoing = false;
         _setPeerCamera(data['video'] == true);
         try {
-          await _startMedia();
+          await _startMedia(offering: false);
           await _peer!.setRemoteDescription(
               RTCSessionDescription(data['sdp'] as String?, 'offer'));
           _remoteDescriptionSet = true;
+          await _adoptVideoTransceiver();
           await _drainCandidates();
         } catch (error) {
           await _finish(answered: false, reason: 'Could not ring: $error');
@@ -560,6 +564,40 @@ class CallService extends ChangeNotifier {
     }
   }
 
+  /// Takes over the video transceiver the caller's offer brought with it.
+  ///
+  /// Applying a remote offer creates a transceiver for each of its m=
+  /// sections that this side has nothing to match. For video that one
+  /// arrives recvonly — libwebrtc has no reason to think we want to send —
+  /// so it is turned round to sendrecv and its sender kept. Both have to
+  /// happen before the answer is written: an answer cannot add an m= line,
+  /// and cannot promise to send on one it has just described as receive-only.
+  ///
+  /// The stream is set for the same reason the offering side passes one:
+  /// without it our video would arrive at the caller belonging to no stream,
+  /// with nothing for their renderer to be pointed at.
+  Future<void> _adoptVideoTransceiver() async {
+    final peer = _peer;
+    if (peer == null || _videoSender != null) return;
+    try {
+      final transceivers = await peer.getTransceivers();
+      for (final transceiver in transceivers) {
+        if (transceiver.receiver.track?.kind != 'video') continue;
+        await transceiver.setDirection(TransceiverDirection.SendRecv);
+        _videoSender = transceiver.sender;
+        final stream = _localStream;
+        if (stream != null) await _videoSender!.setStreams([stream]);
+        debugPrint('[call] adopted video transceiver ${transceiver.mid}');
+        return;
+      }
+      debugPrint('[call] the offer carried no video to answer');
+    } catch (error) {
+      // A call without a camera is still a call. Better to lose the video
+      // than the conversation.
+      debugPrint('[call] could not take over the video transceiver: $error');
+    }
+  }
+
   Future<void> _drainCandidates() async {
     for (final candidate in _pendingCandidates) {
       await _peer?.addCandidate(candidate);
@@ -580,7 +618,7 @@ class CallService extends ChangeNotifier {
 
   // ------------------------------------------------------------ webrtc
 
-  Future<void> _startMedia() async {
+  Future<void> _startMedia({required bool offering}) async {
     await _initRenderers();
     // Audio only, even for a video call: the camera is opened separately, a
     // moment later. Asking for both at once means the camera light comes on
@@ -614,21 +652,33 @@ class CallService extends ChangeNotifier {
     // already exists, with no second offer and no renegotiation for the
     // other side to get wrong.
     //
+    // Only the side making the offer creates it, and that asymmetry is not
+    // cosmetic. JSEP §5.10 says that when a remote offer arrives, only
+    // transceivers created by *addTrack* may be associated with its m=
+    // sections — one made by addTransceiver is passed over, and libwebrtc
+    // builds a second, recvonly transceiver for the remote video instead.
+    // The answerer was left holding a sender belonging to no m= line at all:
+    // it could see the caller's camera and could never send its own, however
+    // many tracks were handed to that sender. That is why one caller's video
+    // worked and the other's did not. The answering side adopts the
+    // transceiver the offer creates for it — see [_adoptVideoTransceiver].
+    //
     // The stream matters as much as the direction. A transceiver added
     // without one describes its m-line with no `a=msid`, and the far side's
     // onTrack then reports a track belonging to no stream at all — which is
-    // exactly what a renderer needs to be pointed at. That was the bug behind
-    // "the other person's square is black": the picture was arriving and
-    // there was nothing to hang it on. Naming the audio stream here puts both
-    // halves of the call in one stream, the way a browser would.
-    final transceiver = await _peer!.addTransceiver(
-      kind: RTCRtpMediaType.RTCRtpMediaTypeVideo,
-      init: RTCRtpTransceiverInit(
-        direction: TransceiverDirection.SendRecv,
-        streams: [_localStream!],
-      ),
-    );
-    _videoSender = transceiver.sender;
+    // exactly what a renderer needs to be pointed at. Naming the audio stream
+    // here puts both halves of the call in one stream, the way a browser
+    // would.
+    if (offering) {
+      final transceiver = await _peer!.addTransceiver(
+        kind: RTCRtpMediaType.RTCRtpMediaTypeVideo,
+        init: RTCRtpTransceiverInit(
+          direction: TransceiverDirection.SendRecv,
+          streams: [_localStream!],
+        ),
+      );
+      _videoSender = transceiver.sender;
+    }
 
     _peer!.onTrack = (event) async {
       // Audio needs no renderer, and it arrives in the same stream as the

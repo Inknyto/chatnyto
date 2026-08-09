@@ -64,6 +64,12 @@ dependencies:
   # Picking a ringtone, and playing it while the app is in front.
   file_selector: ^1.0.3
   audioplayers: ^6.8.1
+  # RSA for the adb client. adbd authenticates every connection with a
+  # challenge signed by an RSA-2048 key, and there is no way to talk to a
+  # television, a phone or a debugging bridge without answering it. The
+  # `cryptography` package this app already uses does not do RSA — it is a
+  # modern-curves library and RSA is deliberately not in it.
+  pointycastle: ^4.0.0
 
 # flutter_secure_storage 10.3.1 pins its Windows implementation to a build
 # that requires win32 5.x, which in turn drags quill_native_bridge_windows

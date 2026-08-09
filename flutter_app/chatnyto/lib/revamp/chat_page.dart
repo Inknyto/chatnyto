@@ -6,6 +6,8 @@ import 'package:flutter_quill/flutter_quill.dart' as quill;
 
 import '../calls/call_page.dart';
 import '../calls/call_service.dart';
+import '../calls/group_call_page.dart';
+import '../calls/group_call_service.dart';
 import '../core/brokers/broker_service.dart';
 import '../core/crypto/crypto_service.dart';
 import '../core/media/image_service.dart';
@@ -75,7 +77,14 @@ class _RevampChatPageState extends State<RevampChatPage> {
     NotificationService.instance.activeChatId = widget.chat.id;
     _load();
     _service.addListener(_onChanged);
+    // A call starting in this group changes what the screen shows, and the
+    // chat service knows nothing about calls.
+    GroupCallService.instance.addListener(_onCallChanged);
     _editorController.addListener(_onTyped);
+  }
+
+  void _onCallChanged() {
+    if (mounted) setState(() {});
   }
 
   /// The round button swaps between sending and recording, so the composer
@@ -95,6 +104,7 @@ class _RevampChatPageState extends State<RevampChatPage> {
       NotificationService.instance.activeChatId = null;
     }
     _service.removeListener(_onChanged);
+    GroupCallService.instance.removeListener(_onCallChanged);
     // Leaving the screen with half a sentence in the box is not typing.
     _service.setTyping(widget.chat, false);
     VoiceNotePlayer.instance.stop();
@@ -183,6 +193,24 @@ class _RevampChatPageState extends State<RevampChatPage> {
         ),
       );
     }
+  }
+
+  /// Joins the group's call, starting it if nobody else has. There is no
+  /// difference between the two from the user's side, which is the point of
+  /// a call being a room rather than a ring.
+  Future<void> _joinGroupCall({bool video = false}) async {
+    final error =
+        await GroupCallService.instance.join(widget.chat, withVideo: video);
+    if (!mounted) return;
+    if (error != null) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(error)));
+      return;
+    }
+    Navigator.push(
+      context,
+      MaterialPageRoute<void>(builder: (_) => const GroupCallPage()),
+    );
   }
 
   // ------------------------------------------------- what a message can do
@@ -969,6 +997,17 @@ class _RevampChatPageState extends State<RevampChatPage> {
                 icon: const Icon(Icons.call_rounded),
                 onPressed: _startCall,
               ),
+            ] else ...[
+              IconButton(
+                tooltip: 'Group video call',
+                icon: const Icon(Icons.videocam_rounded),
+                onPressed: () => _joinGroupCall(video: true),
+              ),
+              IconButton(
+                tooltip: 'Group call',
+                icon: const Icon(Icons.groups_2_rounded),
+                onPressed: () => _joinGroupCall(),
+              ),
             ],
             PopupMenuButton<String>(
               onSelected: (choice) async {
@@ -1024,6 +1063,34 @@ class _RevampChatPageState extends State<RevampChatPage> {
           chatId: widget.chat.id,
           child: Column(
             children: [
+              // A call happening in this group that we are not in. It sits
+              // in the conversation rather than taking the screen: a group
+              // call is not a ring, and interrupting everything for one
+              // would make groups unusable.
+              if (GroupCallService.instance.ringingChatId == widget.chat.id)
+                Material(
+                  color: scheme.primaryContainer,
+                  child: InkWell(
+                    onTap: _joinGroupCall,
+                    child: Padding(
+                      padding:
+                          const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                      child: Row(
+                        children: [
+                          Icon(Icons.groups_2_rounded, color: scheme.primary),
+                          const SizedBox(width: 10),
+                          const Expanded(
+                            child: Text('There is a call in this group'),
+                          ),
+                          FilledButton(
+                            onPressed: _joinGroupCall,
+                            child: const Text('Join'),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
               Expanded(
                 child: ListView.builder(
                   controller: _scrollController,

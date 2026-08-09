@@ -16,6 +16,13 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- Debugging bridge. Shizuku runs shell commands with adb's authority
+         once its owner has started it; Termux lends its own adb binary,
+         which is the only way to reach a device plugged into this phone's
+         USB socket. Neither is required — without them the app still talks
+         adb over the network on its own. -->
+    <uses-permission android:name="moe.shizuku.manager.permission.API_V23" />
+    <uses-permission android:name="com.termux.permission.RUN_COMMAND" />
     <!-- Scanning a network's QR code and taking a photo to send. -->
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
@@ -34,6 +41,16 @@
         android:label="chatnyto"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
+        <!-- Shizuku talks back to an app through a provider of the app's
+             own, which is how it hands over the binder before the app has
+             any privileges to receive it with. -->
+        <provider
+            android:name="rikka.shizuku.ShizukuProvider"
+            android:authorities="${applicationId}.shizuku"
+            android:multiprocess="false"
+            android:enabled="true"
+            android:exported="true"
+            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -77,5 +94,11 @@
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>
         </intent>
+        <!-- Both of these have to be named to be seen at all: since Android
+             11 an app cannot tell whether another one is installed unless it
+             says in advance which it cares about. Without these, Shizuku and
+             Termux look absent even when they are running. -->
+        <package android:name="moe.shizuku.privileged.api"/>
+        <package android:name="com.termux"/>
     </queries>
 </manifest>
