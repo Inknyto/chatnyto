@@ -259,12 +259,18 @@ class WaInputBar extends StatelessWidget {
     required this.onSend,
     this.leading,
     this.trailing,
+    this.action,
   });
 
   final Widget child;
   final VoidCallback onSend;
   final List<Widget>? leading;
   final List<Widget>? trailing;
+
+  /// Replaces the send button. An empty composer offers to record a voice
+  /// note instead of sending nothing, and that button owns a press-and-hold
+  /// gesture the plain send button has no business knowing about.
+  final Widget? action;
 
   @override
   Widget build(BuildContext context) {
@@ -289,16 +295,17 @@ class WaInputBar extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 6),
-          Container(
-            decoration: BoxDecoration(
-              color: scheme.primary,
-              shape: BoxShape.circle,
-            ),
-            child: IconButton(
-              onPressed: onSend,
-              icon: Icon(Icons.send_rounded, color: scheme.onPrimary),
-            ),
-          ),
+          action ??
+              Container(
+                decoration: BoxDecoration(
+                  color: scheme.primary,
+                  shape: BoxShape.circle,
+                ),
+                child: IconButton(
+                  onPressed: onSend,
+                  icon: Icon(Icons.send_rounded, color: scheme.onPrimary),
+                ),
+              ),
         ],
       ),
     );

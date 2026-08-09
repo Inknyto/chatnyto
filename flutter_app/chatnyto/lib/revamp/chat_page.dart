@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_quill/flutter_quill.dart' as quill;
@@ -8,6 +10,8 @@ import '../core/brokers/broker_service.dart';
 import '../core/crypto/crypto_service.dart';
 import '../core/media/image_service.dart';
 import '../core/media/image_viewer.dart';
+import '../core/media/voice_composer.dart';
+import '../core/media/voice_note.dart';
 import '../core/notifications/notification_service.dart';
 import '../core/settings/wallpaper_picker.dart';
 import '../core/theme/background_controller.dart';
@@ -42,6 +46,14 @@ class _RevampChatPageState extends State<RevampChatPage> {
   bool _isOwner = false;
   bool _canAdminister = false;
   bool _sendingImage = false;
+  bool _recordingVoice = false;
+
+  /// Whether the composer holds anything worth sending. Drives the round
+  /// button between "send" and "hold to record", the way a messenger does.
+  bool _hasText = false;
+
+  final GlobalKey<VoiceComposerState> _voiceKey =
+      GlobalKey<VoiceComposerState>();
 
   @override
   void initState() {
@@ -50,6 +62,14 @@ class _RevampChatPageState extends State<RevampChatPage> {
     NotificationService.instance.activeChatId = widget.chat.id;
     _load();
     _service.addListener(_onChanged);
+    _editorController.addListener(_onTyped);
+  }
+
+  /// The round button swaps between sending and recording, so the composer
+  /// has to know when it goes from empty to not.
+  void _onTyped() {
+    final has = _editorController.document.toPlainText().trim().isNotEmpty;
+    if (has != _hasText) setState(() => _hasText = has);
   }
 
   @override
@@ -58,6 +78,8 @@ class _RevampChatPageState extends State<RevampChatPage> {
       NotificationService.instance.activeChatId = null;
     }
     _service.removeListener(_onChanged);
+    VoiceNotePlayer.instance.stop();
+    _editorController.removeListener(_onTyped);
     _editorController.dispose();
     _editorScrollController.dispose();
     _editorFocus.dispose();
@@ -120,6 +142,25 @@ class _RevampChatPageState extends State<RevampChatPage> {
     _editorController.clear();
   }
 
+  /// Sends a finished recording as an ordinary message with an audio
+  /// attachment, so it is encrypted, chunked, receipted and stored exactly
+  /// like everything else in the conversation.
+  Future<void> _sendVoice(VoiceRecording recording) async {
+    final sent = await _service.sendText(
+      widget.chat,
+      _voiceLabel,
+      audio: base64Encode(recording.bytes),
+      audioMs: recording.duration.inMilliseconds,
+    );
+    if (!sent && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(AppLocalizations.of(context).cannotSendLocked),
+        ),
+      );
+    }
+  }
+
   /// Renaming a group moves the whole conversation to a new topic, so it is
   /// restricted to the person who created it.
   Future<void> _renameGroup() async {
@@ -164,8 +205,9 @@ class _RevampChatPageState extends State<RevampChatPage> {
 
   /// Rings this contact. Audio travels directly between the two devices, so
   /// both have to be on the same network.
-  Future<void> _startCall() async {
-    final error = await CallService.instance.call(widget.chat);
+  Future<void> _startCall({bool video = false}) async {
+    final error =
+        await CallService.instance.call(widget.chat, withVideo: video);
     if (!mounted) return;
     if (error != null) {
       ScaffoldMessenger.of(context)
@@ -481,12 +523,18 @@ class _RevampChatPageState extends State<RevampChatPage> {
             ),
           ),
           actions: [
-            if (widget.chat.isDm)
+            if (widget.chat.isDm) ...[
+              IconButton(
+                tooltip: 'Video call',
+                icon: const Icon(Icons.videocam_rounded),
+                onPressed: () => _startCall(video: true),
+              ),
               IconButton(
                 tooltip: l10n.call,
                 icon: const Icon(Icons.call_rounded),
                 onPressed: _startCall,
               ),
+            ],
             PopupMenuButton<String>(
               onSelected: (choice) async {
                 switch (choice) {
@@ -608,41 +656,78 @@ class _RevampChatPageState extends State<RevampChatPage> {
                 ),
               WaInputBar(
                 onSend: _send,
-                leading: [
-                  IconButton(
-                    tooltip: l10n.formatting,
-                    icon: Icon(_showToolbar
-                        ? Icons.keyboard_arrow_down_rounded
-                        : Icons.text_format_rounded),
-                    onPressed: () =>
-                        setState(() => _showToolbar = !_showToolbar),
-                  ),
-                  IconButton(
-                    tooltip: l10n.sendPicture,
-                    icon: _sendingImage
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child:
-                                CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.attach_file_rounded),
-                    onPressed: _sendingImage ? null : _attachImage,
-                  ),
-                ],
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 10),
-                  child: quill.QuillEditor(
-                    controller: _editorController,
-                    scrollController: _editorScrollController,
-                    focusNode: _editorFocus,
-                    config: quill.QuillEditorConfig(
-                      placeholder: l10n.messageHint,
-                      expands: false,
-                      padding: EdgeInsets.zero,
-                    ),
-                  ),
-                ),
+                // An empty composer offers the microphone; the moment there
+                // is something to say in writing, it becomes send again.
+                // The recorder stays mounted while recording — it holds the
+                // gesture and the elapsed time, and taking it out of the
+                // tree mid-press would cancel both.
+                action: _hasText || !VoiceNotes.canRecord
+                    ? null
+                    : VoiceComposer(
+                        key: _voiceKey,
+                        onRecorded: _sendVoice,
+                        onRecordingChanged: (recording) =>
+                            setState(() => _recordingVoice = recording),
+                        onTick: () => setState(() {}),
+                      ),
+                // While recording there is nothing to format and nothing to
+                // attach, and a discard button is what the hand wants.
+                leading: _recordingVoice
+                    ? [
+                        IconButton(
+                          tooltip: 'Discard',
+                          icon: const Icon(Icons.delete_outline_rounded),
+                          onPressed: () => _voiceKey.currentState?.discard(),
+                        ),
+                      ]
+                    : [
+                        IconButton(
+                          tooltip: l10n.formatting,
+                          icon: Icon(_showToolbar
+                              ? Icons.keyboard_arrow_down_rounded
+                              : Icons.text_format_rounded),
+                          onPressed: () =>
+                              setState(() => _showToolbar = !_showToolbar),
+                        ),
+                        IconButton(
+                          tooltip: l10n.sendPicture,
+                          icon: _sendingImage
+                              ? const SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child:
+                                      CircularProgressIndicator(strokeWidth: 2),
+                                )
+                              : const Icon(Icons.attach_file_rounded),
+                          onPressed: _sendingImage ? null : _attachImage,
+                        ),
+                      ],
+                // The text field's place is taken by the level meter, so
+                // the composer never shows a keyboard target that a tap
+                // would use to interrupt the recording.
+                child: _recordingVoice
+                    ? VoiceRecordingStrip(
+                        elapsed:
+                            _voiceKey.currentState?.elapsed ?? Duration.zero,
+                        level: _voiceKey.currentState?.level ?? 0,
+                        locked: _voiceKey.currentState?.locked ?? false,
+                        cancelProgress:
+                            _voiceKey.currentState?.cancelProgress ?? 0,
+                        lockProgress: _voiceKey.currentState?.lockProgress ?? 0,
+                      )
+                    : Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                        child: quill.QuillEditor(
+                          controller: _editorController,
+                          scrollController: _editorScrollController,
+                          focusNode: _editorFocus,
+                          config: quill.QuillEditorConfig(
+                            placeholder: l10n.messageHint,
+                            expands: false,
+                            padding: EdgeInsets.zero,
+                          ),
+                        ),
+                      ),
               ),
             ],
           ),
@@ -679,6 +764,14 @@ class _MessageBody extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final note = VoiceNotes.decode(message.audio);
+    if (note != null) {
+      return _VoiceBubble(
+        id: '${message.from}-${message.ts}',
+        bytes: note,
+        duration: Duration(milliseconds: message.audioMs),
+      );
+    }
     final picture = ImageService.decode(message.image);
     if (picture != null) {
       return Column(
@@ -731,5 +824,102 @@ class _MessageBody extends StatelessWidget {
       // Malformed delta from another client: fall back to the plain text.
       return Text(message.text);
     }
+  }
+}
+
+/// Preview text stored with a voice note, so a chat list and a notification
+/// have something to say without decoding the audio.
+const _voiceLabel = '🎤 Voice message';
+
+/// A voice note in the conversation: play/pause, a progress bar you can
+/// scrub, and the length.
+///
+/// The bar shows the *sent* length until playback starts, because that is
+/// known from the message itself — waiting for the player to report a
+/// duration would leave every note reading 0:00 until it was opened.
+class _VoiceBubble extends StatelessWidget {
+  const _VoiceBubble({
+    required this.id,
+    required this.bytes,
+    required this.duration,
+  });
+
+  final String id;
+  final Uint8List bytes;
+  final Duration duration;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return AnimatedBuilder(
+      animation: VoiceNotePlayer.instance,
+      builder: (context, _) {
+        final player = VoiceNotePlayer.instance;
+        final playing = player.isPlaying(id);
+        final total = playing && player.duration > Duration.zero
+            ? player.duration
+            : duration;
+        final position = playing ? player.position : Duration.zero;
+        final progress = total.inMilliseconds == 0
+            ? 0.0
+            : (position.inMilliseconds / total.inMilliseconds).clamp(0.0, 1.0);
+        return SizedBox(
+          width: 210,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(
+                visualDensity: VisualDensity.compact,
+                icon: Icon(playing
+                    ? Icons.pause_circle_filled_rounded
+                    : Icons.play_circle_fill_rounded),
+                iconSize: 34,
+                color: scheme.primary,
+                onPressed: () => player.toggle(id, bytes),
+              ),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    SliderTheme(
+                      data: SliderTheme.of(context).copyWith(
+                        trackHeight: 3,
+                        thumbShape:
+                            const RoundSliderThumbShape(enabledThumbRadius: 6),
+                        overlayShape:
+                            const RoundSliderOverlayShape(overlayRadius: 12),
+                      ),
+                      child: Slider(
+                        value: progress,
+                        // Scrubbing only makes sense on the note that is
+                        // actually playing; on the others the bar is a
+                        // length indicator and moving it would mean nothing.
+                        onChanged: playing
+                            ? (value) => player.seek(Duration(
+                                milliseconds:
+                                    (total.inMilliseconds * value).round()))
+                            : null,
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.only(left: 8, bottom: 2),
+                      child: Text(
+                        voiceDurationLabel(playing ? position : total),
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: scheme.onSurface.withValues(alpha: 0.7),
+                          fontFeatures: const [FontFeature.tabularFigures()],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
   }
 }

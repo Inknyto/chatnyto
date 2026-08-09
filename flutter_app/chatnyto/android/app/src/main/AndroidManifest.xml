@@ -10,6 +10,11 @@
          and brings them back after a reboot. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- A call that keeps running while the user checks something else needs
+         the microphone and the camera from the background, and from Android
+         14 the service has to say so or the system revokes both. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!-- Scanning a network's QR code and taking a photo to send. -->
     <uses-permission android:name="android.permission.CAMERA" />
@@ -53,7 +58,7 @@
         </activity>
         <service
             android:name="com.pravera.flutter_foreground_task.service.ForegroundService"
-            android:foregroundServiceType="dataSync"
+            android:foregroundServiceType="dataSync|microphone|camera"
             android:exported="false" />
 
         <!-- Don't delete the meta-data below.

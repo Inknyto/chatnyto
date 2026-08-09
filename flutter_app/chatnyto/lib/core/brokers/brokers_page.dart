@@ -55,7 +55,9 @@ class _BrokersPageState extends State<BrokersPage> {
   /// is enough. The sign-in fields are folded away for the brokers that do
   /// need one, and are write-only — an already-saved password is reported as
   /// saved and never rendered back into a field.
-  Future<void> _brokerDialog({Broker? existing}) async {
+  /// [openSignIn] starts with the sign-in fields already unfolded, for the
+  /// case where the broker itself has just told us it wants one.
+  Future<void> _brokerDialog({Broker? existing, bool openSignIn = false}) async {
     final l10n = AppLocalizations.of(context);
     final nameController = TextEditingController(text: existing?.name ?? '');
     final hostController = TextEditingController(text: existing?.host ?? '');
@@ -71,7 +73,7 @@ class _BrokersPageState extends State<BrokersPage> {
         : await BrokerCredentials.instance.has(existing.name);
     if (!mounted) return;
 
-    var showSignIn = false;
+    var showSignIn = openSignIn;
     var clearSignIn = false;
     var checking = false;
 
@@ -504,18 +506,30 @@ class _BrokersPageState extends State<BrokersPage> {
               Builder(builder: (context) {
                 final connected = _service.isConnected(broker);
                 final wanted = broker.autoConnect;
+                final refusal = _service.refusalFor(broker);
+                // A network that answered but would not let us in is a
+                // different problem from one that is not there, and only the
+                // first is something the user can fix from here.
+                final needsSignIn = !connected &&
+                    wanted &&
+                    refusal == BrokerRefusal.needsSignIn;
                 return LiquidGlass(
                   margin: const EdgeInsets.symmetric(vertical: 6),
                   child: ListTile(
+                    onTap: needsSignIn
+                        ? () => _brokerDialog(existing: broker, openSignIn: true)
+                        : null,
                     onLongPress: () => _showBrokerOptions(broker),
                     // The icon carries the live state, so the switch is free
                     // to mean what the user asked for.
                     leading: Icon(
                       connected
                           ? Icons.cloud_done_rounded
-                          : (wanted
-                              ? Icons.cloud_sync_rounded
-                              : Icons.cloud_off_rounded),
+                          : (needsSignIn
+                              ? Icons.lock_outline_rounded
+                              : (wanted
+                                  ? Icons.cloud_sync_rounded
+                                  : Icons.cloud_off_rounded)),
                       color: connected
                           ? Colors.greenAccent
                           : (wanted ? Colors.orangeAccent : null),
@@ -524,16 +538,23 @@ class _BrokersPageState extends State<BrokersPage> {
                     subtitle: Text(
                       connected
                           ? '${broker.host}:${broker.port} · connected'
-                          : (wanted
-                              // The master switch quietly overrules every
-                              // one of these. Saying so here is the
-                              // difference between "this network is coming
-                              // back" and "this network never will".
-                              ? '${broker.host}:${broker.port} · '
-                                  '${_autoConnect ? 'reconnecting when '
-                                      'reachable' : 'waiting — turn on '
-                                      'Connect automatically above'}'
-                              : '${broker.host}:${broker.port} · off'),
+                          : needsSignIn
+                              // The broker is there and answered — it just
+                              // wants a name and a password. Saying so, and
+                              // making the row open the place to type them,
+                              // turns a dead switch into one step.
+                              ? '${broker.host}:${broker.port} · needs a '
+                                  'sign-in — tap to add it'
+                              : (wanted
+                                  // The master switch quietly overrules every
+                                  // one of these. Saying so here is the
+                                  // difference between "this network is coming
+                                  // back" and "this network never will".
+                                  ? '${broker.host}:${broker.port} · '
+                                      '${_autoConnect ? 'reconnecting when '
+                                          'reachable' : 'waiting — turn on '
+                                          'Connect automatically above'}'
+                                  : '${broker.host}:${broker.port} · off'),
                     ),
                     trailing: Row(
                       mainAxisSize: MainAxisSize.min,

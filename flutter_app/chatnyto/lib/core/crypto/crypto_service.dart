@@ -126,12 +126,40 @@ class PublicIdentity {
     }
   }
 
+  /// Answers already given, so the same advertisement is never checked
+  /// twice.
+  ///
+  /// Presence is published retained, so every reconnection to every broker
+  /// re-delivers every peer's advertisement — and each check is an Ed25519
+  /// verification in pure Dart on the UI thread. On a phone with a handful
+  /// of networks and a room full of peers that was enough work to make the
+  /// app stop drawing.
+  ///
+  /// Caching is sound because the question has one answer forever: the key,
+  /// the signature and the message are all in the entry, and none of them
+  /// can change without becoming a different entry. A forgery does not get
+  /// in — it fails once and the failure is what is remembered.
+  static final Map<String, bool> _verified = {};
+
+  /// Bounded so a broker full of junk cannot grow it without limit. Well
+  /// past any plausible number of real peers.
+  static const _verifiedLimit = 2000;
+
   /// Verifies the self-signature of the advertisement.
   Future<bool> verify() async {
     try {
+      // Keyed on the exact triple the verification is about: the public
+      // key, the signature, and the message signed. Nothing looser will do
+      // — keying on the picture's length rather than its content would let
+      // a picture be swapped for another of the same size behind a
+      // signature that had already been accepted.
+      final signed = await signedMessage();
+      final key = '$ed25519PublicKey|$signature|$signed';
+      final known = _verified[key];
+      if (known != null) return known;
       final ed = Ed25519();
-      final message = utf8.encode(await signedMessage());
-      return ed.verify(
+      final message = utf8.encode(signed);
+      final valid = await ed.verify(
         message,
         signature: Signature(
           base64Decode(signature),
@@ -141,6 +169,9 @@ class PublicIdentity {
           ),
         ),
       );
+      if (_verified.length >= _verifiedLimit) _verified.clear();
+      _verified[key] = valid;
+      return valid;
     } catch (_) {
       return false;
     }
@@ -495,6 +526,7 @@ class IdentityService {
     _x25519KeyPair = xPair;
     _ed25519KeyPair = edPair;
     _displayName = displayName;
+    _forgetAdvertisement();
     pendingRecoveryCode = recoveryCode;
     return publicIdentity();
   }
@@ -546,6 +578,7 @@ class IdentityService {
     _ed25519KeyPair =
         await Ed25519().newKeyPairFromSeed(base64Decode(seeds['ed'] as String));
     _displayName = account.name;
+    _forgetAdvertisement();
     _storageKey = null;
 
     if (!account.keysKnown) {
@@ -614,7 +647,10 @@ class IdentityService {
     final index = _accounts.indexWhere((a) => a.id == accountId);
     if (index == -1) return;
     _accounts[index] = _accounts[index].copyWith(name: name);
-    if (accountId == _activeId) _displayName = name;
+    if (accountId == _activeId) {
+      _displayName = name;
+      _forgetAdvertisement();
+    }
     await _saveAccounts();
   }
 
@@ -722,6 +758,7 @@ class IdentityService {
     _x25519KeyPair = null;
     _ed25519KeyPair = null;
     _storageKey = null;
+    _forgetAdvertisement();
   }
 
   /// Symmetric key for encrypting data at rest (message history, outbox),
@@ -765,8 +802,27 @@ class IdentityService {
     return prefs.getString('$avatarPrefKey${_scopeFor(accountId)}') ?? '';
   }
 
+  /// The last advertisement produced, kept until something in it changes.
+  ///
+  /// Signing is Ed25519 over a pure-Dart curve implementation: tens of
+  /// milliseconds on an older phone, on the UI thread. This is asked for on
+  /// every heartbeat, for every connected network, and by every screen that
+  /// wants to know its own fingerprint — which added up to the app spending
+  /// most of its time signing the same twelve fields over and over, and
+  /// eventually to the system declaring it unresponsive.
+  ///
+  /// The signature is deterministic for a given name, key and picture, so a
+  /// cached one is not a stale one: it is the same answer, not recomputed.
+  PublicIdentity? _advertisement;
+
+  /// Drops the cached advertisement. Called wherever the name, the picture
+  /// or the keys change — anything the signature covers.
+  void _forgetAdvertisement() => _advertisement = null;
+
   /// The public, self-signed advertisement of this identity.
   Future<PublicIdentity> publicIdentity() async {
+    final cached = _advertisement;
+    if (cached != null) return cached;
     final xPub = await _x25519KeyPair!.extractPublicKey();
     final edPub = await _ed25519KeyPair!.extractPublicKey();
     final xB64 = base64Encode(xPub.bytes);
@@ -781,7 +837,7 @@ class IdentityService {
       utf8.encode(await unsigned.signedMessage()),
       keyPair: _ed25519KeyPair!,
     );
-    return PublicIdentity(
+    return _advertisement = PublicIdentity(
       name: unsigned.name,
       x25519PublicKey: unsigned.x25519PublicKey,
       ed25519PublicKey: unsigned.ed25519PublicKey,

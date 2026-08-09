@@ -19,6 +19,7 @@ import '../core/widgets/connection_status.dart';
 import '../core/widgets/liquid_glass.dart';
 import '../core/widgets/person_avatar.dart';
 import '../core/widgets/wa_components.dart';
+import '../devices/devices_page.dart';
 import '../humans/contacts_page.dart';
 import '../humans/humans_page.dart';
 import '../l10n/app_localizations.dart';
@@ -973,7 +974,7 @@ class CommunitiesTab extends StatelessWidget {
           Icons.devices_other_rounded,
           AppLocalizations.of(context).communityIot,
           AppLocalizations.of(context).communityIotSub,
-          const RobotsPage(),
+          const DevicesPage(),
         ),
         tile(
           Icons.auto_awesome_rounded,
@@ -991,6 +992,15 @@ class CommunitiesTab extends StatelessWidget {
           'MQTT rooms (old app)',
           'The original broker/topic screens',
           const AIsPage(),
+        ),
+        // Kept reachable now that the IoT tile opens the device registry
+        // instead: this is where anyone who used the old screens will look
+        // for them.
+        tile(
+          Icons.smart_toy_outlined,
+          'Robot chat (old app)',
+          'The original robots screens',
+          const RobotsPage(),
         ),
       ],
     );

@@ -132,6 +132,35 @@ class CallService extends ChangeNotifier {
   Timer? _directTimer;
   bool _relaying = false;
 
+  /// The camera's own track, held apart from [_localStream] because it is
+  /// started and stopped independently of the call: an audio call can grow a
+  /// camera and lose it again without the call itself being renegotiated.
+  MediaStreamTrack? _cameraTrack;
+  RTCRtpSender? _videoSender;
+  bool _cameraOn = false;
+  bool _peerCameraOn = false;
+  bool _frontCamera = true;
+
+  /// Renderers for the two pictures. Created with the call and disposed with
+  /// it, so the screen can be opened and closed as often as the user likes
+  /// without either side of the video restarting.
+  final RTCVideoRenderer localVideo = RTCVideoRenderer();
+  final RTCVideoRenderer remoteVideo = RTCVideoRenderer();
+  bool _renderersReady = false;
+
+  /// Whether this device is sending pictures, and whether the other one is.
+  bool get cameraOn => _cameraOn;
+  bool get peerCameraOn => _peerCameraOn;
+
+  /// True while either side has a camera on — which is what makes the call
+  /// screen show video instead of an avatar.
+  bool get videoCall => _cameraOn || _peerCameraOn;
+
+  /// Whether turning the camera on is possible at all right now. It is not
+  /// once a call has fallen back to the broker: that path carries compressed
+  /// voice and nothing else.
+  bool get canUseCamera => inCall && !_relaying;
+
   /// Where the media path has got to, for the call screen's status line.
   String get iceState => _iceState;
 
@@ -217,7 +246,11 @@ class CallService extends ChangeNotifier {
   // ------------------------------------------------------------- outgoing
 
   /// Rings [chat]'s peer. Only direct chats can be called.
-  Future<String?> call(ChatEntry chat) async {
+  ///
+  /// [withVideo] opens the camera before the offer goes out, so the other
+  /// phone rings as a video call and shows a picture the moment it is
+  /// answered rather than a second or two later.
+  Future<String?> call(ChatEntry chat, {bool withVideo = false}) async {
     if (!chat.isDm) return 'Only one-to-one chats can be called.';
     if (inCall) return 'A call is already in progress.';
     final peer = chat.peerIdentity;
@@ -237,13 +270,14 @@ class CallService extends ChangeNotifier {
 
     try {
       await _startMedia();
+      if (withVideo) await setCamera(true, tellPeer: false);
       final offer = await _peer!.createOffer({
         'offerToReceiveAudio': true,
-        'offerToReceiveVideo': false,
+        'offerToReceiveVideo': true,
       });
       await _peer!.setLocalDescription(offer);
       _localOffer = offer.sdp;
-      await _send({'call': 'offer', 'sdp': offer.sdp});
+      await _send({'call': 'offer', 'sdp': offer.sdp, 'video': withVideo});
     } catch (error) {
       await _finish(answered: false, reason: 'Could not start the call: $error');
       return 'Could not start the call: $error';
@@ -263,7 +297,7 @@ class CallService extends ChangeNotifier {
     _offerTimer?.cancel();
     _offerTimer = Timer.periodic(const Duration(seconds: 2), (_) {
       if (_state != CallState.dialling) return;
-      _send({'call': 'offer', 'sdp': _localOffer});
+      _send({'call': 'offer', 'sdp': _localOffer, 'video': _cameraOn});
     });
     return null;
   }
@@ -274,9 +308,13 @@ class CallService extends ChangeNotifier {
 
   // ------------------------------------------------------------- incoming
 
-  Future<void> answer() async {
+  /// Takes the call. [withVideo] turns this device's camera on as it is
+  /// answered — offered on the ringing screen when the caller is already
+  /// sending pictures, so answering a video call with video is one tap.
+  Future<void> answer({bool withVideo = false}) async {
     await NotificationService.instance.cancelIncomingCall();
     if (_state != CallState.ringing || _peer == null) return;
+    if (withVideo) await setCamera(true, tellPeer: false);
     _ringTimer?.cancel();
     _setState(CallState.connecting);
     // Armed before the negotiation rather than after it. Everything below
@@ -289,10 +327,10 @@ class CallService extends ChangeNotifier {
     try {
       final answer = await _peer!.createAnswer({
         'offerToReceiveAudio': true,
-        'offerToReceiveVideo': false,
+        'offerToReceiveVideo': true,
       });
       await _peer!.setLocalDescription(answer);
-      await _send({'call': 'answer', 'sdp': answer.sdp});
+      await _send({'call': 'answer', 'sdp': answer.sdp, 'video': _cameraOn});
     } catch (error) {
       await _finish(answered: false, reason: 'Could not answer: $error');
     }
@@ -321,6 +359,80 @@ class CallService extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Turns this device's camera on or off mid-call.
+  ///
+  /// No renegotiation: the sender was created with the call, so this is a
+  /// track being handed to it or taken away. [tellPeer] is false only when
+  /// the camera is being started as part of placing or answering a call,
+  /// where the offer or answer already carries the news.
+  Future<void> setCamera(bool on, {bool tellPeer = true}) async {
+    if (on == _cameraOn) return;
+    if (on && !canUseCamera) return;
+    try {
+      if (on) {
+        final stream = await navigator.mediaDevices.getUserMedia({
+          'audio': false,
+          'video': {
+            'facingMode': _frontCamera ? 'user' : 'environment',
+            // Modest on purpose. This has to survive a phone's uplink and a
+            // relay in the middle; a call that keeps going at a smaller size
+            // beats one that stutters at a larger one.
+            'width': {'ideal': 640},
+            'height': {'ideal': 480},
+            'frameRate': {'ideal': 20},
+          },
+        });
+        _cameraTrack = stream.getVideoTracks().first;
+        await _videoSender?.replaceTrack(_cameraTrack);
+        localVideo.srcObject = stream;
+      } else {
+        await _videoSender?.replaceTrack(null);
+        // Stopped, not just detached: a camera that is merely unused still
+        // shows the light that tells the user they are being filmed.
+        await _cameraTrack?.stop();
+        _cameraTrack = null;
+        localVideo.srcObject = null;
+      }
+      _cameraOn = on;
+      if (tellPeer) await _send({'call': 'video', 'on': on});
+      notifyListeners();
+    } catch (error) {
+      debugPrint('[call] could not switch the camera: $error');
+    }
+  }
+
+  Future<void> toggleCamera() => setCamera(!_cameraOn);
+
+  /// Front to back and back again, without interrupting the call.
+  Future<void> switchCamera() async {
+    final track = _cameraTrack;
+    if (track == null) return;
+    try {
+      await Helper.switchCamera(track);
+      _frontCamera = !_frontCamera;
+      notifyListeners();
+    } catch (error) {
+      debugPrint('[call] could not switch camera: $error');
+    }
+  }
+
+  /// Whether the local preview should be mirrored — a front camera shown
+  /// unmirrored is the thing everybody notices and nobody can name.
+  bool get frontCamera => _frontCamera;
+
+  void _setPeerCamera(bool on) {
+    if (_peerCameraOn == on) return;
+    _peerCameraOn = on;
+    notifyListeners();
+  }
+
+  Future<void> _initRenderers() async {
+    if (_renderersReady) return;
+    await localVideo.initialize();
+    await remoteVideo.initialize();
+    _renderersReady = true;
+  }
+
   Future<void> toggleSpeaker() async {
     _speaker = !_speaker;
     try {
@@ -346,8 +458,13 @@ class CallService extends ChangeNotifier {
       case 'offer':
         // The caller repeats its offer while it rings. A repeat of the call
         // we are already ringing for is not a second call, and answering it
-        // with "busy" would hang up on the very person calling us.
-        if (inCall && _chat?.id == chat.id) return;
+        // with "busy" would hang up on the very person calling us. It may
+        // still carry news — the caller turning its camera on while we are
+        // deciding whether to pick up.
+        if (inCall && _chat?.id == chat.id) {
+          _setPeerCamera(data['video'] == true);
+          return;
+        }
         if (inCall) {
           // Genuinely busy with somebody else: tell them rather than
           // leaving them ringing.
@@ -359,6 +476,7 @@ class CallService extends ChangeNotifier {
         _peerFingerprint = chat.peerIdentity?.fingerprint ?? '';
         _peerAvatar = chat.peerIdentity?.avatar ?? '';
         _outgoing = false;
+        _setPeerCamera(data['video'] == true);
         try {
           await _startMedia();
           await _peer!.setRemoteDescription(
@@ -381,6 +499,7 @@ class CallService extends ChangeNotifier {
 
       case 'answer':
         if (_peer == null) return;
+        _setPeerCamera(data['video'] == true);
         _ringTimer?.cancel();
         _offerTimer?.cancel();
         _offerTimer = null;
@@ -413,6 +532,12 @@ class CallService extends ChangeNotifier {
           // Candidates can arrive before the description they belong to.
           _pendingCandidates.add(candidate);
         }
+
+      // A camera going on or off does not change the negotiated media — the
+      // video transceiver is there from the start — so it needs no new
+      // offer, only a word to say the picture is about to arrive or stop.
+      case 'video':
+        _setPeerCamera(data['on'] == true);
 
       case 'relay':
         // The other side could not find a direct route. Follow it over,
@@ -456,6 +581,11 @@ class CallService extends ChangeNotifier {
   // ------------------------------------------------------------ webrtc
 
   Future<void> _startMedia() async {
+    await _initRenderers();
+    // Audio only, even for a video call: the camera is opened separately, a
+    // moment later. Asking for both at once means the camera light comes on
+    // while the phone is still ringing, and for a call that is never
+    // answered it never should have.
     _localStream = await navigator.mediaDevices.getUserMedia({
       'audio': true,
       'video': false,
@@ -476,6 +606,24 @@ class CallService extends ChangeNotifier {
     for (final track in _localStream!.getTracks()) {
       await _peer!.addTrack(track, _localStream!);
     }
+
+    // The video path is negotiated on every call, whether or not a camera is
+    // ever switched on. It costs nothing when unused — an SDP section with
+    // no track sends no packets — and it buys the thing that matters: the
+    // camera can be turned on mid-call by handing a track to a sender that
+    // already exists, with no second offer and no renegotiation for the
+    // other side to get wrong.
+    final transceiver = await _peer!.addTransceiver(
+      kind: RTCRtpMediaType.RTCRtpMediaTypeVideo,
+      init: RTCRtpTransceiverInit(direction: TransceiverDirection.SendRecv),
+    );
+    _videoSender = transceiver.sender;
+
+    _peer!.onTrack = (event) {
+      if (event.streams.isEmpty) return;
+      remoteVideo.srcObject = event.streams.first;
+      notifyListeners();
+    };
 
     // Surfaced on the call screen and in the logs: when a call fails it is
     // almost always the network path, and "Connecting…" forever tells the
@@ -589,6 +737,10 @@ class CallService extends ChangeNotifier {
     _directTimer?.cancel();
     if (tellPeer) await _send({'call': 'relay'});
 
+    // The relay carries compressed voice and nothing else, so any video has
+    // to stop here rather than appear to keep running with a frozen picture.
+    if (_cameraOn || _peerCameraOn) await _stopVideo(tellPeer: _cameraOn);
+
     // The microphone cannot be held twice. WebRTC's attempt is over.
     for (final track in _localStream?.getTracks() ?? []) {
       await track.stop();
@@ -632,6 +784,23 @@ class CallService extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Stops the camera and clears both pictures. Used when a call ends and
+  /// when it falls back to a path that cannot carry video.
+  Future<void> _stopVideo({required bool tellPeer}) async {
+    if (tellPeer && _cameraOn) await _send({'call': 'video', 'on': false});
+    _cameraOn = false;
+    _peerCameraOn = false;
+    try {
+      await _cameraTrack?.stop();
+    } catch (_) {
+      // The track may already have gone with the peer connection.
+    }
+    _cameraTrack = null;
+    localVideo.srcObject = null;
+    remoteVideo.srcObject = null;
+    notifyListeners();
+  }
+
   void _sendVoice(Uint8List frame) {
     final chat = _chat;
     if (chat == null || !_relaying) return;
@@ -666,6 +835,9 @@ class CallService extends ChangeNotifier {
       ));
       await _saveHistory();
     }
+
+    await _stopVideo(tellPeer: false);
+    _videoSender = null;
 
     for (final track in _localStream?.getTracks() ?? []) {
       await track.stop();

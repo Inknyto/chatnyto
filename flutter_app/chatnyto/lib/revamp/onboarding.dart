@@ -8,6 +8,7 @@ import '../core/crypto/crypto_service.dart';
 import '../core/crypto/password_vault.dart';
 import '../core/notifications/background_service.dart';
 import '../core/notifications/notification_service.dart';
+import '../devices/device_service.dart';
 import '../core/widgets/liquid_glass.dart';
 import '../core/widgets/person_avatar.dart';
 import '../account/recovery_pages.dart';
@@ -445,6 +446,10 @@ Future<void> _startServices() async {
   await ChatService.instance.init();
   await ContactBook.instance.load();
   await CallService.instance.init();
+  // Loaded at start, not when the IoT screen is opened: a device's readings
+  // only exist while something is subscribed to them, and a temperature
+  // that has been arriving all day should be there the moment you look.
+  await DeviceService.instance.load();
   // Fire and forget: connect whatever network is reachable.
   BrokerService.instance.autoConnectAll().then(
         (_) => BrokerService.instance.advertiseEverywhere(),
@@ -469,4 +474,5 @@ void forgetAccountState() {
   ChatService.instance.reset();
   ContactBook.instance.reset();
   CallService.instance.reset();
+  DeviceService.instance.reset();
 }

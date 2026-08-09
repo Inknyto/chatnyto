@@ -46,10 +46,16 @@ class Broker {
   /// happened to be added.
   final int lastConnectedAt;
 
-  Broker copyWith({bool? autoConnect, int? lastConnectedAt}) => Broker(
+  Broker copyWith({
+    String? host,
+    int? port,
+    bool? autoConnect,
+    int? lastConnectedAt,
+  }) =>
+      Broker(
         name: name,
-        host: host,
-        port: port,
+        host: host ?? this.host,
+        port: port ?? this.port,
         username: username,
         password: password,
         autoConnect: autoConnect ?? this.autoConnect,
@@ -149,7 +155,67 @@ class _BrokerAddress {
       webSocket: false,
     );
   }
+
+  /// The addresses worth trying for [broker], best guess first.
+  ///
+  /// A host typed with a scheme is an instruction, so it is the only
+  /// candidate. A bare one is a guess, and the guess used to be "plain MQTT
+  /// on 1883" — which is wrong for exactly the servers people type by name.
+  /// A public host reached over a tunnel or a reverse proxy has 1883 shut;
+  /// its broker is behind WebSockets on 443, and a phone that only tried
+  /// 1883 could never connect to it however long it waited.
+  ///
+  /// So a name gets the ladder — WebSockets first, then TLS, then plain —
+  /// and a numeric address does not: a LAN or LoRa broker is plain MQTT, and
+  /// probing 443 on it only spends seconds to learn nothing.
+  static List<_BrokerAddress> candidatesFor(Broker broker) {
+    final raw = broker.host.trim();
+    final typedScheme = RegExp(r'^[a-zA-Z][a-zA-Z0-9+.-]*://').hasMatch(raw);
+    final explicitPort = broker.port != 0 && broker.port != 1883;
+    if (typedScheme || explicitPort || !_isHostname(raw)) {
+      return [parse(broker)];
+    }
+    return [
+      // The common shape: a broker published through an HTTPS front door.
+      // Both paths are tried because /mqtt is the convention and / is what a
+      // tunnel mapped to the whole origin gives you.
+      parse(broker.copyWith(host: 'wss://$raw/mqtt', port: 443)),
+      parse(broker.copyWith(host: 'wss://$raw/', port: 443)),
+      parse(broker.copyWith(host: 'mqtts://$raw', port: 8883)),
+      parse(broker.copyWith(host: 'mqtt://$raw', port: 1883)),
+    ];
+  }
+
+  /// Whether [raw] is a DNS name rather than an IP address. Only names get
+  /// the ladder above.
+  static bool _isHostname(String raw) {
+    if (!raw.contains('.') || raw.contains('/')) return false;
+    final bare = raw.split(':').first;
+    if (RegExp(r'^[0-9.]+$').hasMatch(bare)) return false;
+    return RegExp(r'^[a-zA-Z0-9.-]+$').hasMatch(bare);
+  }
+
+  /// How this address would be written down, so a successful probe can be
+  /// saved and never probed again.
+  String get asHost => webSocket
+      ? server
+      : (secure ? 'mqtts://$server' : (port == 1883 ? server : 'mqtt://$server'));
 }
+
+/// How one address on the ladder answered.
+enum _Attempt {
+  connected,
+
+  /// A broker is there and it spoke MQTT — it just would not let us in.
+  /// Trying further addresses would only lose that information.
+  needsSignIn,
+
+  /// Nothing answered: wrong port, wrong host, no network.
+  unreachable,
+}
+
+/// Why a network is not connected, in the terms the user has to act on.
+enum BrokerRefusal { needsSignIn, unreachable }
 
 /// A message being reassembled from the pieces it was published in.
 class _PartialMessage {
@@ -179,6 +245,11 @@ class DiscoveredBroker {
 const presenceTopicPrefix = 'chatnyto/presence';
 const chatTopicPrefix = 'chatnyto/chat';
 const groupsTopicPrefix = 'chatnyto/groups';
+
+/// Where the user's own hardware lives. Not encrypted, unlike everything
+/// else: a lamp cannot do X25519, and a subtree the broker's ACL already
+/// restricts to signed-in users is the honest boundary for it.
+const devicesTopicPrefix = 'chatnyto/devices';
 
 /// A public group advertised on the mesh.
 class PublicGroupAd {
@@ -236,6 +307,10 @@ class BrokerService extends ChangeNotifier {
   /// Invoked for every message arriving on `chatnyto/chat/#` of any
   /// connected broker. Set by the chat messenger.
   void Function(String topic, String payload)? onChatMessage;
+
+  /// Invoked for anything arriving under [devicesTopicPrefix] — readings,
+  /// and the echo of our own commands. Set by the device registry.
+  void Function(String topic, String payload)? onDeviceMessage;
 
   /// Invoked on every heartbeat tick so other services (chat sync, group
   /// announcements) can piggyback on the same cadence.
@@ -391,13 +466,80 @@ class BrokerService extends ChangeNotifier {
 
   final Map<String, Future<bool>> _inFlight = {};
 
+  /// Tries every address [broker] could be at, in order, and keeps the one
+  /// that answers.
+  ///
+  /// The ladder stops early on purpose. A broker that replies "not
+  /// authorized" has been found — it is simply asking for a sign-in — and
+  /// carrying on down the ladder would trade a precise complaint the user
+  /// can act on for a vague "unreachable".
   Future<bool> _connectOnce(Broker broker) async {
+    final candidates = _BrokerAddress.candidatesFor(broker);
+    for (var i = 0; i < candidates.length; i++) {
+      final address = candidates[i];
+      final last = i == candidates.length - 1;
+      final outcome = await _tryAddress(broker, address, probing: !last);
+      switch (outcome) {
+        case _Attempt.connected:
+          // Remember what worked, so the next connection goes straight there
+          // instead of walking the ladder again.
+          if (candidates.length > 1) await _rememberAddress(broker, address);
+          _refusals.remove(broker.name);
+          return true;
+        case _Attempt.needsSignIn:
+          _refusals[broker.name] = BrokerRefusal.needsSignIn;
+          if (candidates.length > 1) await _rememberAddress(broker, address);
+          notifyListeners();
+          return false;
+        case _Attempt.unreachable:
+          continue;
+      }
+    }
+    _refusals[broker.name] = BrokerRefusal.unreachable;
+    notifyListeners();
+    return false;
+  }
+
+  /// Why each network last refused, so the UI can say something better than
+  /// "not connected". Cleared the moment it connects.
+  final Map<String, BrokerRefusal> _refusals = {};
+
+  /// Why [broker] last failed to connect, or null when it never has.
+  BrokerRefusal? refusalFor(Broker broker) => _refusals[broker.name];
+
+  /// Rewrites a network's address to the one that actually answered.
+  Future<void> _rememberAddress(Broker broker, _BrokerAddress address) async {
+    final index = _brokers.indexWhere((b) => b.name == broker.name);
+    if (index == -1) return;
+    final host = address.asHost;
+    if (_brokers[index].host == host && _brokers[index].port == address.port) {
+      return;
+    }
+    _brokers[index] =
+        _brokers[index].copyWith(host: host, port: address.port);
+    await _save();
+  }
+
+  Future<_Attempt> _tryAddress(
+    Broker broker,
+    _BrokerAddress address, {
+    required bool probing,
+  }) async {
     final clientId =
         'chatnyto-${DateTime.now().millisecondsSinceEpoch % 1000000}';
-    final address = _BrokerAddress.parse(broker);
 
-    final client =
-        MqttServerClient.withPort(address.server, clientId, address.port)
+    final client = MqttServerClient.withPort(
+      address.server,
+      clientId,
+      address.port,
+      // A probe asks once. mqtt_client's default is three tries with a wait
+      // between each, which turns a four-rung ladder into most of a minute
+      // of the user watching a spinner.
+      maxConnectionAttempts: probing ? 1 : 3,
+    )
+          // Deliberately not zero. Mosquitto sets max_keepalive, and a v3
+          // client that asks for no keepalive at all is refused outright —
+          // with "identifier rejected", which says nothing about the cause.
           ..keepAlivePeriod = 30
           // Long enough for a slow mobile link, short enough that a host
           // which is not there admits it before the user gives up.
@@ -436,13 +578,14 @@ class BrokerService extends ChangeNotifier {
         password.isEmpty ? null : password,
       );
     } catch (_) {
+      final code = client.connectionStatus?.returnCode;
       client.disconnect();
-      return false;
+      return _refused(code) ? _Attempt.needsSignIn : _Attempt.unreachable;
     }
     if (client.connectionStatus?.state != MqttConnectionState.connected) {
-      // e.g. bad credentials on an authenticated broker
+      final code = client.connectionStatus?.returnCode;
       client.disconnect();
-      return false;
+      return _refused(code) ? _Attempt.needsSignIn : _Attempt.unreachable;
     }
     _clients[broker.name] = client;
 
@@ -471,6 +614,16 @@ class BrokerService extends ChangeNotifier {
           _handleGroupAd(event.topic, payload.payload.message);
           continue;
         }
+        if (event.topic.startsWith(devicesTopicPrefix)) {
+          try {
+            onDeviceMessage?.call(
+                event.topic, utf8.decode(payload.payload.message));
+          } catch (_) {
+            // A device publishing something that is not text is not an
+            // error worth interrupting anything for.
+          }
+          continue;
+        }
         if (!event.topic.startsWith(presenceTopicPrefix)) continue;
         try {
           final json = jsonDecode(utf8.decode(payload.payload.message))
@@ -493,12 +646,22 @@ class BrokerService extends ChangeNotifier {
     client.subscribe('$presenceTopicPrefix/#', MqttQos.atLeastOnce);
     client.subscribe('$chatTopicPrefix/#', MqttQos.atLeastOnce);
     client.subscribe('$groupsTopicPrefix/#', MqttQos.atLeastOnce);
+    client.subscribe('$devicesTopicPrefix/#', MqttQos.atLeastOnce);
+    for (final topic in _extraTopics) {
+      client.subscribe(topic, MqttQos.atLeastOnce);
+    }
 
     await _markConnected(broker);
     await advertiseIdentity(broker);
     notifyListeners();
-    return true;
+    return _Attempt.connected;
   }
+
+  /// Whether a CONNACK means "you found me, now identify yourself" rather
+  /// than "there is nothing here".
+  static bool _refused(MqttConnectReturnCode? code) =>
+      code == MqttConnectReturnCode.notAuthorized ||
+      code == MqttConnectReturnCode.badUsernameOrPassword;
 
   /// Notes that [broker] just worked: it moves to the top of the networks
   /// list, and connecting to it counts as wanting it connected — so a
@@ -556,6 +719,27 @@ class BrokerService extends ChangeNotifier {
     }
     _publicGroups.remove(slug);
     notifyListeners();
+  }
+
+  /// Topics outside the app's own tree that something has asked to hear.
+  ///
+  /// Devices the user already had before this app existed publish wherever
+  /// their firmware was told to, and no wildcard of ours covers that. They
+  /// are kept here so a broker that connects later subscribes to them too.
+  final Set<String> _extraTopics = {};
+
+  void watchTopics(Iterable<String> topics) {
+    final fresh = topics.where((t) => !_extraTopics.contains(t)).toSet();
+    if (fresh.isEmpty) return;
+    _extraTopics.addAll(fresh);
+    for (final client in _clients.values) {
+      if (client.connectionStatus?.state != MqttConnectionState.connected) {
+        continue;
+      }
+      for (final topic in fresh) {
+        client.subscribe(topic, MqttQos.atLeastOnce);
+      }
+    }
   }
 
   Future<void> disconnect(Broker broker) async {
@@ -672,6 +856,13 @@ class BrokerService extends ChangeNotifier {
   /// and null while there is still something missing.
   @visibleForTesting
   String? collectChunk(Map<String, dynamic> json) => _collectChunk(json);
+
+  /// The addresses [broker] would be tried at, as `host:port` strings.
+  @visibleForTesting
+  static List<String> addressLadder(Broker broker) => [
+        for (final address in _BrokerAddress.candidatesFor(broker))
+          '${address.server}:${address.port}',
+      ];
 
   /// How the pieces of [payload] look on the wire, in order.
   @visibleForTesting

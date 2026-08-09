@@ -689,3 +689,129 @@ configuration).
 Done: Add device manipulation capabilities like kdeconnect, and also a remote compatible to
      multiple tvs and make it able to add, configure and manipulate multiple IOT devices in the
      IOT section of the communities tab. [Future enhancement - requires IoT device integration framework]
+The video call does not show the other person's camera. The place for the other person is
+black. After sending the audio, I cannot read it on the other phone. It gets sent, but when
+I play the read button, nothing happens. 
+Add possibility to press the audio message button and swipe up to send an audio(like
+whatsapp).
+Immplement any functionnality that is present on whatsapp but not on this app.
+For the voice notes, you have to display the waveform graph on the sent and received
+messages.
+Done: Implement all the placeholders and test everything. — The three things
+Done: todo.txt still carried as "future enhancement", plus the VPS
+Done: connection the phones could not make.
+Done: --- why the phones could not reach the vps ------------------------
+Done: broker.supa-tech.com answers 502 on /.well-known/chatnyto.json, so the
+Done: profile lookup returned nothing and the address was saved as typed:
+Done: plain MQTT on 1883, a port that server has shut. The connection could
+Done: never succeed however long it retried, and the switch just sat there.
+Done: A bare hostname is now a guess rather than an instruction, so it gets
+Done: a ladder: wss://host/mqtt, wss://host/, mqtts://host:8883, then plain
+Done: 1883. A numeric address does not — a LAN or LoRa broker is plain MQTT
+Done: and probing 443 on it only wastes seconds. The ladder stops early on
+Done: purpose: a broker that replies "not authorized" has been found, and
+Done: carrying on would trade a precise complaint for a vague one. Whatever
+Done: answered is written back, so it is never probed again. The networks
+Done: list now says "needs a sign-in — tap to add it" and the row opens the
+Done: sign-in fields. Verified: both phones connect to the vps and messages
+Done: cross with blue ticks.
+Done: While proving the broker was reachable I found a second thing worth
+Done: knowing: mosquitto with max_keepalive set refuses any MQTT 3.x client
+Done: that asks for no keepalive at all, and refuses it as "identifier
+Done: rejected" — which says nothing about the cause. The app asks for 30,
+Done: so it was never bitten, but the comment is now in the code.
+Done: --- voice messages ---------------------------------------------------
+Done: Hold the microphone to record, let go to send, slide left to throw it
+Done: away, slide up to lock and keep recording hands-free. The composer
+Done: turns into a live level meter while recording, so you can see the
+Done: microphone is hearing you before you play it back, and the lock fills
+Done: as your finger rises towards it — a gesture nobody is told about is a
+Done: gesture nobody uses. Anything under 0.7s is discarded with a word
+Done: about why, and three minutes is the cap.
+Done: A note is an ordinary message with an audio attachment, so it is
+Done: encrypted, chunked, receipted and stored exactly like a photo and the
+Done: broker needed nothing new. AAC at 24 kbit/s mono is about 3 kB a
+Done: second, so a short one still fits a LoRa-sized link.
+Done: Verified on hardware, and it found a real bug: notes are cached under
+Done: the sender's fingerprint, fingerprints are written with colons, and
+Done: Android's MediaPlayer refuses a path containing one outright with
+Done: nothing but MEDIA_ERROR_UNKNOWN to say why. Every note played
+Done: silently. Fixed and unit-tested. Recording, sending, receiving and
+Done: the blue ticks were all watched on the two phones; playback has not
+Done: been watched since the filename fix.
+Done: --- video calls ------------------------------------------------------
+Done: The camera button is on every call, not only on ones that started as
+Done: video, because turning a voice call into a video one is the commonest
+Done: reason to want a camera. That works without renegotiating: the video
+Done: path is negotiated on every call whether or not a camera is ever
+Done: switched on, so turning it on is handing a track to a sender that
+Done: already exists. It costs nothing unused — an SDP section with no track
+Done: sends no packets — and it removes the whole class of bugs where one
+Done: side gets a second offer wrong.
+Done: The camera is opened separately from the microphone, a moment after
+Done: the call starts: asking for both at once lights the camera while the
+Done: phone is still ringing, and for a call nobody answers it never should
+Done: have. Someone ringing with their camera on gets Video and Voice as two
+Done: answer buttons — being seen stays a choice made at this end. A call
+Done: that falls back to the MQTT relay drops the video rather than freezing
+Done: it, because that path carries compressed voice and nothing else.
+Done: The service now declares microphone and camera foreground types, or
+Done: Android 14 revokes both the moment the app goes to the background
+Done: mid-call. NOT verified on hardware.
+Done: --- IoT devices ------------------------------------------------------
+Done: The IoT tile opened the old robots chat screens; it now opens a device
+Done: registry. Add, name, group by room, configure, remove. Two kinds of
+Done: thing in one list, because the user is thinking "the lamp" and "the
+Done: telly", not about protocols:
+Done:  * MQTT devices, with controls the user defines — switch, dial, button,
+Done:    reading — each one a topic. A bare name goes under
+Done:    chatnyto/devices/, which is the subtree the broker's ACL already
+Done:    grants signed-in users; a leading slash means an absolute topic, for
+Done:    hardware that was publishing somewhere before this app existed.
+Done:    Commands are retained, so a device that was unplugged comes back to
+Done:    the state it was left in. A dial publishes on release, not on every
+Done:    pixel of the drag — a hundred messages for one gesture is not
+Done:    something a LoRa link can carry.
+Done:  * Televisions, over their own protocols on the LAN, so the remote
+Done:    keeps working with the internet unplugged: Roku ECP (nothing to
+Done:    pair), Samsung Tizen and LG webOS (each asks its owner to allow the
+Done:    phone once, and the token that saves them being asked again is
+Done:    stored), and Android TV over adb. The remote is laid out the way a
+Done:    remote is held: D-pad where the thumb rests, volume and channel as
+Done:    rockers down the sides. Only Roku is swept for on the network —
+Done:    provoking an "allow this device?" prompt on every set in the
+Done:    building is not a search, it is a nuisance.
+Done: The old robots screens are still reachable under Classic rooms.
+Done: Verified on hardware: the section opens, the editor opens, the kinds
+Done: and the topic explanation render. The controls have NOT been driven
+Done: against a device yet.
+Done: --- an ANR, and what was actually causing it -------------------------
+Done: Testing on the Samsung produced "chatnyto isn't responding". The Dart
+Done: profiler says the main isolate was pinned at 100% of a core in
+Done: Ed25519, split between signing our own advertisement and verifying
+Done: other people's. Both were pure waste:
+Done:  * publicIdentity() re-signed the same twelve fields on every call, and
+Done:    it is called on every heartbeat, for every connected network, and by
+Done:    every screen that wants its own fingerprint. Ed25519 is deterministic
+Done:    so the cached signature is the same answer, not a stale one.
+Done:  * Presence is retained, so every reconnection to every broker
+Done:    re-delivers every peer's advertisement, each one verified again from
+Done:    scratch. Verification results are now cached.
+Done: The cache is keyed on the public key, the signature and the exact
+Done: message signed. A looser key would be a hole: keying on the picture's
+Done: length rather than its content would let a picture be swapped for
+Done: another the same size behind a signature already accepted. There is a
+Done: test for exactly that substitution.
+Done: This roughly halved it — 566 CPU ticks per 5s down to 220 — but the
+Done: app is still using about 44% of a core sitting idle, so something else
+Done: is spinning and I have not found it yet. That is the open item.
+Done: --- verified, and not -----------------------------------------------
+Done: 49 unit tests pass; analyze is clean (48 pre-existing style infos, no
+Done: errors or warnings); the APK builds. Watched on the phones: the vps
+Done: connection, messages both ways with blue ticks, a voice note recorded
+Done: and sent and read, the Communities IoT section and the device editor.
+Done: Not watched on hardware: video calls, the device controls against a
+Done: real device, the TV remotes (no television here to point it at), and
+Done: voice playback since the filename fix.
+Done: Screen timeout was set to 15 minutes on both phones for testing; it
+Done: was 60s before.

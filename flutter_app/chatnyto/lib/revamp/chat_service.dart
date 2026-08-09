@@ -140,6 +140,8 @@ class RevampMessage {
     required this.ts,
     this.delta,
     this.image,
+    this.audio,
+    this.audioMs = 0,
     this.status = MessageStatus.sent,
   });
 
@@ -150,6 +152,16 @@ class RevampMessage {
   final List<dynamic>? delta; // Quill delta operations, when formatted
   final String? image; // base64 JPEG attachment
 
+  /// base64 AAC voice note. Sent as an attachment on an ordinary message so
+  /// it inherits the encryption, the chunking and the receipts.
+  final String? audio;
+
+  /// How long the note runs. Carried explicitly because the length is what
+  /// the bubble shows before anything is decoded or played, and reading it
+  /// out of the container would mean decoding every note in a conversation
+  /// just to draw the list.
+  final int audioMs;
+
   /// Changes as receipts come back, so it is not final. Never sent over the
   /// wire: it is what *this* device knows about a message's progress, and
   /// the other end has its own view.
@@ -157,6 +169,7 @@ class RevampMessage {
 
   bool get isRich => delta != null && delta!.isNotEmpty;
   bool get hasImage => image != null && image!.isNotEmpty;
+  bool get hasAudio => audio != null && audio!.isNotEmpty;
 
   Map<String, dynamic> toJson() => {
         'f': from,
@@ -165,6 +178,8 @@ class RevampMessage {
         'ts': ts,
         if (isRich) 'd': delta,
         if (hasImage) 'img': image,
+        if (hasAudio) 'aud': audio,
+        if (hasAudio) 'ams': audioMs,
         // Stored so the ticks survive a restart.
         's': status.name,
       };
@@ -184,6 +199,8 @@ class RevampMessage {
         ts: (json['ts'] as num?)?.toInt() ?? 0,
         delta: json['d'] == null ? null : List<dynamic>.from(json['d']),
         image: json['img'] as String?,
+        audio: json['aud'] as String?,
+        audioMs: (json['ams'] as num?)?.toInt() ?? 0,
         status: MessageStatus.values.firstWhere(
           (s) => s.name == json['s'],
           orElse: () => MessageStatus.sent,
@@ -642,7 +659,10 @@ class ChatService extends ChangeNotifier {
   /// Works offline: the message lands in the chat immediately and waits in
   /// the encrypted outbox until a broker is reachable.
   Future<bool> sendText(ChatEntry chat, String text,
-      {List<dynamic>? delta, String? image}) async {
+      {List<dynamic>? delta,
+      String? image,
+      String? audio,
+      int audioMs = 0}) async {
     final key = await _keyFor(chat);
     if (key == null) return false;
     String from = '';
@@ -659,6 +679,8 @@ class ChatService extends ChangeNotifier {
       ts: DateTime.now().millisecondsSinceEpoch,
       delta: delta,
       image: image,
+      audio: audio,
+      audioMs: audioMs,
       status: BrokerService.instance.anyConnected
           ? MessageStatus.sent
           : MessageStatus.pending,
