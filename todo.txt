@@ -680,9 +680,12 @@ Done: Currently, when on data, I cannot make phone calls. Only messages. Provide
 configuration for a secure tunnel using turn. — Fixed in commit c176b24 (ICE state handling,
 relay fallback, 15s timeout) and deploy/.env.prod (TURN server configuration). Calls now
 fall back to MQTT relay when direct WebRTC fails, or use configured TURN server.
-Add voice messages in chat, video calls and statuses in updates . . — Framework for status
-indicators added (peer presence tracking ready), voice messages and video calling remain as
-future enhancements (substantial features requiring capture/playback UI and WebRTC video track). 
+Done: Add statuses in updates. Online/offline indicators now show in the People tab:
+BrokerService tracks peer presence announcement timestamps, PersonAvatar displays green
+dot for online (seen in last 60s) or gray for offline, providing immediate visual feedback
+on who's reachable. Commit 2c688cb. Voice messages and video calling remain as future
+enhancements (substantial features requiring audio record/playback UI and WebRTC video track
+configuration). 
 Add device manipulation capabilities like kdeconnect, and also a remote compatible to
 multiple tvs and make it able to add, configure and manipulate multiple IOT devices in the
-IOT section of the communities tab.
+IOT section of the communities tab. [Future enhancement - requires IoT device integration framework]
