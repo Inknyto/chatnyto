@@ -97,11 +97,19 @@ class CallService extends ChangeNotifier {
   static const _ringTimeout = Duration(seconds: 45);
 
   /// How long a direct connection gets before the audio is relayed through
-  /// the broker instead. Long enough for ICE to finish on a slow mobile
-  /// network, short enough that a call that cannot connect directly does not
-  /// sit on "Connecting…" until the caller gives up — which is exactly what
-  /// it used to do.
-  static const _directTimeout = Duration(seconds: 8);
+  /// the broker instead.
+  ///
+  /// This is a backstop, not the usual way the fallback happens: ICE
+  /// reporting `failed` switches over at once, and ICE reporting `connected`
+  /// cancels it. It only runs out when neither answer ever comes — a
+  /// platform channel that went quiet, or a negotiation that never settled.
+  ///
+  /// Eight seconds was too tight. Gathering reflexive candidates from a STUN
+  /// server adds a round trip that a purely local call never paid, so a
+  /// deadline that was comfortable on one WiFi started expiring on exactly
+  /// the networks the STUN servers had been added to serve — and expiring
+  /// meant tearing down a connection that was still coming up.
+  static const _directTimeout = Duration(seconds: 15);
 
   final List<CallRecord> _history = [];
   bool _loaded = false;
@@ -271,6 +279,13 @@ class CallService extends ChangeNotifier {
     if (_state != CallState.ringing || _peer == null) return;
     _ringTimer?.cancel();
     _setState(CallState.connecting);
+    // Armed before the negotiation rather than after it. Everything below
+    // crosses a platform channel, and a channel that never answers hangs
+    // instead of throwing — which left the call sitting on "Connecting…"
+    // with the ring timer already cancelled and no other timer running. A
+    // call must never be able to reach this state without something set to
+    // rescue it.
+    _armDirectTimeout();
     try {
       final answer = await _peer!.createAnswer({
         'offerToReceiveAudio': true,
@@ -278,7 +293,6 @@ class CallService extends ChangeNotifier {
       });
       await _peer!.setLocalDescription(answer);
       await _send({'call': 'answer', 'sdp': answer.sdp});
-      _armDirectTimeout();
     } catch (error) {
       await _finish(answered: false, reason: 'Could not answer: $error');
     }
@@ -367,15 +381,24 @@ class CallService extends ChangeNotifier {
 
       case 'answer':
         if (_peer == null) return;
-        await _peer!.setRemoteDescription(
-            RTCSessionDescription(data['sdp'] as String?, 'answer'));
-        _remoteDescriptionSet = true;
-        await _drainCandidates();
         _ringTimer?.cancel();
         _offerTimer?.cancel();
         _offerTimer = null;
         _setState(CallState.connecting);
+        // Same reasoning as in [answer]: the state and its rescue timer are
+        // set first, so a description that never settles cannot strand the
+        // call. It also used to be possible for setRemoteDescription to
+        // throw straight out of here — nothing caught it — and leave the
+        // caller on "Calling…" until the ring timed out.
         _armDirectTimeout();
+        try {
+          await _peer!.setRemoteDescription(
+              RTCSessionDescription(data['sdp'] as String?, 'answer'));
+          _remoteDescriptionSet = true;
+          await _drainCandidates();
+        } catch (error) {
+          debugPrint('[call] could not take the answer: $error');
+        }
 
       case 'ice':
         final candidate = RTCIceCandidate(
@@ -461,6 +484,25 @@ class CallService extends ChangeNotifier {
       debugPrint('[call] ice $state');
       _iceState = state.name.replaceFirst('RTCIceConnectionState', '');
       notifyListeners();
+      switch (state) {
+        case RTCIceConnectionState.RTCIceConnectionStateConnected:
+        case RTCIceConnectionState.RTCIceConnectionStateCompleted:
+          // ICE is the layer that actually carries the audio, so this is the
+          // honest "the call is up". Waiting only on onConnectionState cost
+          // real calls: where that callback is late or never arrives, the
+          // fallback timer fired and tore down a path whose media was
+          // already flowing.
+          _directTimer?.cancel();
+          _goLive();
+        case RTCIceConnectionState.RTCIceConnectionStateFailed:
+          // ICE has exhausted every candidate pair. There is nothing to be
+          // gained by sitting out the rest of the timeout.
+          if (_connectedAt == null && !_relaying && inCall) {
+            _startRelay(tellPeer: true);
+          }
+        default:
+          break;
+      }
     };
 
     _peer!.onIceCandidate = (candidate) {
@@ -529,6 +571,20 @@ class CallService extends ChangeNotifier {
   /// are never half in one mode and half in the other.
   Future<void> _startRelay({required bool tellPeer}) async {
     if (_relaying || !inCall) return;
+    // Asked before anything is torn down. Past the teardown below there is
+    // no way back to WebRTC, so discovering only afterwards that this device
+    // could never have relayed meant destroying a working attempt and
+    // replacing it with nothing.
+    if (!await VoiceRelay.instance.canStart()) {
+      if (!inCall || _relaying) return;
+      await _finish(
+        answered: _connectedAt != null,
+        reason: 'No direct route, and this device cannot relay a call',
+      );
+      return;
+    }
+    // Awaiting above gave the other side a chance to get here first.
+    if (_relaying || !inCall) return;
     _relaying = true;
     _directTimer?.cancel();
     if (tellPeer) await _send({'call': 'relay'});
@@ -541,19 +597,36 @@ class CallService extends ChangeNotifier {
     _localStream = null;
     await _peer?.close();
     _peer = null;
+    // Android does not hand the microphone straight back. Opening a fresh
+    // AudioRecord in the same breath as WebRTC released the old one fails
+    // often enough to lose calls over, and the failure looks like a device
+    // that cannot relay at all rather than one that was asked too early.
+    await Future<void>.delayed(const Duration(milliseconds: 250));
 
     VoiceRelay.instance.onFrame = _sendVoice;
     VoiceRelay.instance.muted = _muted;
-    final started = await VoiceRelay.instance.start();
+    // Bounded. Both the player setup and the capture start cross a platform
+    // channel, and a channel that never answers would hang the call here —
+    // the precise failure this fallback exists to prevent.
+    final started = await VoiceRelay.instance
+        .start()
+        .timeout(const Duration(seconds: 6), onTimeout: () => false);
     if (!started) {
       _relaying = false;
+      VoiceRelay.instance.onFrame = null;
+      await VoiceRelay.instance.stop();
       await _finish(
         answered: _connectedAt != null,
-        reason: VoiceRelay.supported
-            ? 'Could not reach the other device'
-            : 'No direct route, and this device cannot relay a call',
+        reason: 'Could not reach the other device',
       );
       return;
+    }
+    // WebRTC routed the audio while it held the call; nothing does now, so
+    // the earpiece/speaker choice has to be applied again by hand.
+    try {
+      await Helper.setSpeakerphoneOn(_speaker);
+    } catch (error) {
+      debugPrint('[call] could not set the audio route: $error');
     }
     _goLive();
     notifyListeners();

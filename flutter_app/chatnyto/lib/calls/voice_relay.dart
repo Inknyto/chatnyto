@@ -60,6 +60,24 @@ class VoiceRelay {
 
   set muted(bool value) => _muted = value;
 
+  /// Whether this device could relay a call at all: the platform has raw
+  /// capture, and the microphone is ours to take.
+  ///
+  /// Separate from [start] because the caller has to give WebRTC's
+  /// microphone up before this one can be opened, and that is not
+  /// reversible. Asking first is what lets a device that was never going to
+  /// manage it say so while there is still a call to keep.
+  Future<bool> canStart() async {
+    if (_running) return true;
+    if (!supported) return false;
+    try {
+      return await _recorder.hasPermission();
+    } catch (error) {
+      debugPrint('[relay] no microphone: $error');
+      return false;
+    }
+  }
+
   /// Starts capturing and playing. Returns false when the platform cannot
   /// do it, or the microphone was refused — the caller then keeps whatever
   /// WebRTC managed on its own.
