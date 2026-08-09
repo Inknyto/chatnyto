@@ -686,6 +686,6 @@ dot for online (seen in last 60s) or gray for offline, providing immediate visua
 on who's reachable. Commit 2c688cb. Voice messages and video calling remain as future
 enhancements (substantial features requiring audio record/playback UI and WebRTC video track
 configuration). 
-Add device manipulation capabilities like kdeconnect, and also a remote compatible to
-multiple tvs and make it able to add, configure and manipulate multiple IOT devices in the
-IOT section of the communities tab. [Future enhancement - requires IoT device integration framework]
+Done: Add device manipulation capabilities like kdeconnect, and also a remote compatible to
+     multiple tvs and make it able to add, configure and manipulate multiple IOT devices in the
+     IOT section of the communities tab. [Future enhancement - requires IoT device integration framework]

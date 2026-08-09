@@ -69,7 +69,7 @@ class PersonAvatar extends StatelessWidget {
           );
 
     // Add online status indicator if provided
-    final avatar = online != null
+    final avatarWidget = online != null
         ? Stack(
             children: [
               circle,
@@ -105,11 +105,11 @@ class PersonAvatar extends StatelessWidget {
                   ),
                 )
             : null);
-    if (action == null) return avatar;
+    if (action == null) return avatarWidget;
     return InkWell(
       customBorder: const CircleBorder(),
       onTap: action,
-      child: avatar,
+      child: avatarWidget,
     );
   }
 }
