@@ -1,0 +1,6 @@
+points:
+	discuter avec les humains,
+	discuter avec les objets,
+	discuter avec les IA
+
+

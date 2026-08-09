@@ -1,0 +1,14 @@
+Ce week-end est le week end des présentations. Chacun se présente en message
+écrit, donne son apercu a propos du projet et garde une copie de son message dans le 
+groupe 'Chatnyto-Presentations'. Les questions sont les bienvenues. 
+Le groupe Chatnyto-Roadmap contient un apercu global des étapes du projet,
+avec leur étape d'éxécution. Je vous invite par la suite à le discuter. 
+Le groupe chatnyto-non-initiés est disponible pour toute question concernant
+l'informatique en général, pour les non-développeurs qui sont les bienvenus,
+et se montreront très utiles durant ce projet. 
+Je vous invite à vous présenter, a copier le message dans le groupe
+chatnyto-présentations et a étudier le plan global non détaillé dans le groupe 
+Chatnyto-Roadmap. Le groupe Chatnyto-Stackexchange est réservé à toutes les
+questions très techniques, les bouts de code et les logs d'erreurs. 
+Ce groupe ci, Chatnyto, sera le groupe principal d'informations et de
+discussions globales ou inclassables. 

@@ -1,0 +1,9 @@
+Bienvenue sur Chatnyto! Voici les liens de tous les groupes de communication:
+
+1. Channel de communication: https://t.me/chatnyto
+2. Groupe des présentations: https://t.me/chatnyto_presentations
+3. Groupe de discussions générales: https://t.me/chatnyto_general
+4. Groupe du roadmap (plan du projet): https://t.me/chatnyto_roadmap
+5. Groupe des questions sur l'informatique: https://t.me/chatnyto_non_inities
+6. Groupe des questions techniques: https://t.me/chatnyto_stackexchange
+7. Lien du projet sur Github: https://github.com/Inknyto/chatnyto

@@ -6,6 +6,8 @@ import '../account/security_page.dart';
 import '../ai/ai_agents_page.dart';
 import '../ais/ais_page.dart';
 import '../calls/calls_tab.dart';
+import '../calls/call_page.dart';
+import '../calls/call_service.dart';
 import '../core/brokers/broker_service.dart';
 import '../core/brokers/brokers_page.dart';
 import '../account/share_pages.dart';
@@ -504,6 +506,28 @@ class _PeopleTabState extends State<PeopleTab> {
               ),
             ),
             const Divider(height: 1),
+            ListTile(
+              leading: const Icon(Icons.call_rounded),
+              title: const Text('Call'),
+              onTap: () async {
+                Navigator.pop(sheetContext);
+                final chat = await ChatService.instance.startDm(peer);
+                if (!mounted) return;
+                final error = await CallService.instance.call(chat);
+                if (error != null) {
+                  if (mounted) {
+                    ScaffoldMessenger.of(context)
+                        .showSnackBar(SnackBar(content: Text(error)));
+                  }
+                  return;
+                }
+                if (!mounted) return;
+                Navigator.push(
+                  context,
+                  GlassPageRoute(page: CallPage(avatar: peer.avatar)),
+                );
+              },
+            ),
             ListTile(
               leading: const Icon(Icons.message_rounded),
               title: Text(AppLocalizations.of(context).message),

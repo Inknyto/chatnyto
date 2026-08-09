@@ -1,6 +1,9 @@
+# ~/Documents/git/chatnyto/flutter_app/chatnyto/linux/CMakeLists.txt 26 Jul 2026 at 10:05:52 PM
 # Project-level configuration.
 cmake_minimum_required(VERSION 3.10)
 project(runner LANGUAGES CXX)
+# Add to linux/CMakeLists.txt near the top (after project(...))
+add_compile_options("-include" "stdint.h")
 
 # The name of the executable created for the application. Change this to change
 # the on-disk name of your application.

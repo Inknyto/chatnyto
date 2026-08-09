@@ -1,0 +1,42 @@
+I. Parler avec les humains
+Chatnyto consistera dans un premier temps en une application de discussion.
+Elle permettra de discuter de manière gratuite dans le meme routeur wifi. Ce
+routeur ne sera pas forcément un modem internet. Il peut etre aussi simple
+qu'un téléphone portable qui partage sa bande passante, sans connection
+internet. 
+
+
+
+    1. Parler avec soi meme
+        a. Configurer son premier broker
+        b. Connecter son client
+
+    2. Parler avec tout le monde
+        a. Configurer son client sur un broker central
+        b. Utiliser un broker différent à tour de role
+
+    3. Parler avec chacun
+        a. Configurer un moyen de reconnaissance 
+        b. Securiser et chiffrer les messages
+
+II. Parler avec les IA
+    1. Parler avec les IA dans le cloud
+        a. Intégration d'IA open source
+        b. Intégration d'IA payantes 
+
+    2. Parler avec ses IA en local
+        a. Configurer son gestionnaire d'IA local
+        b. Spécialiser son IA pour son propre cas d'utilisation
+    3. Parler avec les IA des autres
+        a. Programmation de messages pour les autres entités (personnes et IA)
+        b. Programmation de taches pour les autres entités (personnes et IA)
+III. Parler avec les objets
+    1. Parler avec les objets déjà connectés
+        a. Connecter l'appli avec ses téléphones et ordinateurs 
+        b. Connecter l'appli avec des téléviseurs et micro ordinateurs.
+    2. Parler avec des objets fraichement connectés 
+        a. Configurer son premier esp32 en broker 
+        b. Connecter des objets de tous les jours (lampes, climatiseur, ventilo) avec l'appli grace à son propre broker.  
+    3. Créer ses propres objets et parler avec 
+        a. <>
+        b. <>

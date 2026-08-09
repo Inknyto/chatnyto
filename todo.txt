@@ -668,3 +668,10 @@ Done: APK builds. Not verified on hardware: both phones were off USB by the
 Done: time this was finished — the Samsung had run down to 4% — so the closed
 Done: app ringing has not been watched happening on a real phone yet. That is
 Done: the one thing here that only a phone can confirm.
+Add voice messages in chat, video calls and statuses in updates . . 
+In all network views, add possibility to call the person via a button when their contact is
+shown.
+You can read the deploy/.env.prod and modify it, ajusting it for any needs, as all the
+secrets are in `pass` password manager.
+Currently, when on data, I cannot make phone calls. Only messages. Provide correct
+configuration for a secure tunnel using turn . 

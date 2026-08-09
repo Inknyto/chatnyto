@@ -2,6 +2,9 @@ import 'dart:math';
 
 import 'package:flutter/material.dart';
 
+import '../../calls/call_page.dart';
+import '../../calls/call_service.dart';
+import '../../revamp/chat_service.dart';
 import '../crypto/crypto_service.dart';
 import '../widgets/liquid_glass.dart';
 import 'broker_service.dart';
@@ -369,6 +372,28 @@ class _NetworkGraphPageState extends State<NetworkGraphPage>
             title: const Text('Public key'),
             subtitle: Text(peer.fingerprint,
                 style: const TextStyle(fontFamily: 'monospace', fontSize: 11)),
+          ),
+          ListTile(
+            leading: const Icon(Icons.call_rounded),
+            title: const Text('Call'),
+            onTap: () async {
+              Navigator.pop(sheetContext);
+              final chat = await ChatService.instance.startDm(peer);
+              if (!mounted) return;
+              final error = await CallService.instance.call(chat);
+              if (error != null) {
+                if (mounted) {
+                  ScaffoldMessenger.of(context)
+                      .showSnackBar(SnackBar(content: Text(error)));
+                }
+                return;
+              }
+              if (!mounted) return;
+              Navigator.push(
+                context,
+                GlassPageRoute(page: CallPage(avatar: peer.avatar)),
+              );
+            },
           ),
         ];
     }

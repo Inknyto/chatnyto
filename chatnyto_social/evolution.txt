@@ -1,0 +1,4 @@
+Pour le moment, le projet flutter est le plus élaboré. 
+
+Si vous disposez d'un appareil android, vous pouvez installer le dernier
+build de l'apk dans builds/android/ChatNyto.1.0.0.apk

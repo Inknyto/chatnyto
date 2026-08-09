@@ -1,0 +1,22 @@
+Bonjour chers membres de Chatnyto! Aujourd'hui, Nous allons mettre en place
+l'environnement de développement. Ceci est possible sur Windows, Linux et
+Android. 
+
+Voici les prérequis pour mettre en place son environnement de développement:
+NodeJs: un language de programmation et runtime pour javascript coté serveur,
+Voici le site officiel pour installer NodeJs:
+https://nodejs.org/en/download/package-manager
+
+Mosquitto: Un message broker open source développé et maintenu par Eclipse (de java),
+Voici le site officiel de mosquitto pour son installation: 
+https://mosquitto.org/download/
+
+Pm2: Un gestionnaire de processus optimisé pour le déploiement d'applications NodeJs en production
+Pm2 peut etre installé en utilisant npm (NodeJs Package Manager)
+https://pm2.keymetrics.io/
+
+Ensuite, il vous faudra démarrer Mosquitto en utilisant pm2:
+Sur linux: pm2 start mosquitto
+
+Après cela, votre client pourra se connecter automatiquement lors de son
+déploiement en local. 

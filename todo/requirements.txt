@@ -1,3 +1,5 @@
+# ~/Documents/git/chatnyto/todo/requirements.txt 25 Jul 2026 at 04:01:36 PM
+For Claude: This is the old todo list
 # By Inknyto
 signup
 signin
@@ -11,7 +13,7 @@ with ai as taskers, daemons and guests:
 	see iot devices on same network (maybe remotely later)
 	schedule tasks on same network (maybe remotely later)
 show online status
-control * devices
+control any type of devices(IOT, electronic, appliances)
 change broker ip and chat topic
 ask ai about images or things 
 talk to ai

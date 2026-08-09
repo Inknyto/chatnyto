@@ -1,0 +1,17 @@
+Ce week-end est le week end des présentations. Chacun se présente ici, en message
+écrit, donne son apercu a propos du projet et garde une copie de son message dans le 
+groupe 'Chatnyto-Presentations': https://t.me/+AOlj7LnbLrE1OGI0
+. Les questions sont les bienvenues. 
+Le groupe Chatnyto-Roadmap contient un apercu global des étapes du projet,
+avec leur étape d'éxécution: https://t.me/+ep77Fr0_OGYzNjk0
+
+ Je vous invite par la suite à le discuter. 
+Le groupe Chatnyto-Non-Initiés est disponible pour toute question concernant
+l'informatique en général, pour les non-développeurs qui sont les bienvenus,
+et se montreront très utiles durant ce projet: https://t.me/+byrC32uz5vo5OTk0
+
+
+Je vous invite à vous présenter ici meme, a copier le message dans le groupe
+Chatnyto-Présentations et a étudier le plan global non détaillé dans le groupe 
+Chatnyto-Roadmap. Le groupe Chatnyto-Stackexchange est réservé à toutes les
+questions très techniques, les bouts de code et les logs d'erreurs.

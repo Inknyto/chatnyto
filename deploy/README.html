@@ -1,0 +1,157 @@
+<h1 id="running-a-chatnyto-broker-on-a-server">Running a ChatNyto broker
+on a server</h1>
+<p>ChatNyto normally needs no server at all: phones find each other
+through the Heltec LoRa box or a broker on the same WiFi. A public
+broker is for the case where people are not on the same network — it
+relays the same end-to-end encrypted traffic, and can read none of
+it.</p>
+<h2 id="what-this-deploys">What this deploys</h2>
+<table>
+<colgroup>
+<col style="width: 50%" />
+<col style="width: 50%" />
+</colgroup>
+<thead>
+<tr>
+<th>Piece</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>mosquitto</code></td>
+<td>The MQTT broker. Authenticated users only, restricted to the
+<code>chatnyto/#</code> topic tree.</td>
+</tr>
+<tr>
+<td><code>profile</code></td>
+<td>Serves <code>/.well-known/chatnyto.json</code>, so the app needs
+nothing but the domain.</td>
+</tr>
+<tr>
+<td><code>cloudflared</code></td>
+<td>Publishes the broker as <code>wss://&lt;your domain&gt;/mqtt</code>
+through a Cloudflare tunnel, so no port is opened on the server.</td>
+</tr>
+<tr>
+<td><code>coturn</code></td>
+<td>Optional. Lets two people on mobile data call each other. Off unless
+<code>TURN_USER</code>/<code>TURN_PASSWORD</code> are set.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="calls">Calls</h2>
+<p>Messages need only the broker. Calls need a route between the two
+devices, and that is a different problem: on one WiFi they find each
+other and nothing else is involved, but on mobile data each phone sits
+behind the carrier’s NAT with no address the other could dial.</p>
+<p>Setting <code>TURN_USER</code>, <code>TURN_PASSWORD</code> and
+<code>TURN_PUBLIC_IP</code> starts a coturn container and publishes it
+in the profile, so the app picks it up along with everything else. It is
+the one piece that cannot go through the tunnel — TURN is UDP — so its
+ports have to be open on the server:</p>
+<pre><code>3478/udp   3478/tcp   49160-49200/udp</code></pre>
+<p>Without it, calls still work between people on the same network, and
+elsewhere the app relays the audio over MQTT instead: narrower sound,
+but it goes through wherever a message does.</p>
+<h2 id="what-the-user-types">What the user types</h2>
+<p>Just the address: <code>supa-tech.com</code>. The app fetches
+<code>https://supa-tech.com/.well-known/chatnyto.json</code> over HTTPS,
+and from it learns the WebSocket URL and the account to use. The
+credential goes straight into the device keystore — it is never shown in
+the interface, never typed, and never written to the app’s own
+storage.</p>
+<p>A plain MQTT port cannot travel through an HTTP tunnel, which is why
+the broker also listens for MQTT over WebSockets — the app speaks both,
+and picks the right one from the URL scheme.</p>
+<h2 id="one-time-setup">One-time setup</h2>
+<ol type="1">
+<li><p><strong>On the server</strong>, clone the repo where
+<code>DEPLOY_DIR</code> points:</p>
+<div class="sourceCode" id="cb2"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="fu">sudo</span> mkdir <span class="at">-p</span> /opt/chatnyto <span class="kw">&amp;&amp;</span> <span class="fu">sudo</span> chown <span class="st">&quot;</span><span class="va">$USER</span><span class="st">&quot;</span> /opt/chatnyto</span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a><span class="fu">git</span> clone <span class="op">&lt;</span>repo<span class="op">&gt;</span> /opt/chatnyto</span></code></pre></div>
+<p>Docker and the Compose plugin must be installed.</p></li>
+<li><p><strong>In Cloudflare Zero Trust</strong>, create a tunnel and
+add two public hostname routes for your domain:</p>
+<table>
+<thead>
+<tr>
+<th>Path</th>
+<th>Service</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>/mqtt</code></td>
+<td><code>http://mqtt:9001</code></td>
+</tr>
+<tr>
+<td><code>/.well-known/*</code></td>
+<td><code>http://profile:80</code></td>
+</tr>
+</tbody>
+</table>
+<p>Copy the tunnel token. The second route is what lets the app
+configure itself from the domain alone.</p></li>
+<li><p><strong>On your machine</strong>, fill in the two config
+files:</p>
+<div class="sourceCode" id="cb3"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="fu">cp</span> deploy/deploy.conf.example deploy/deploy.conf     <span class="co"># server address</span></span>
+<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a><span class="fu">cp</span> deploy/.env.prod.example  deploy/.env.prod        <span class="co"># accounts + token</span></span></code></pre></div>
+<p><code>.env.prod</code> entries may be <code>$(pass show …)</code>;
+they are resolved on your machine and streamed to the server’s tmpfs, so
+secrets never touch its disk and are never committed.</p></li>
+</ol>
+<h2 id="deploying">Deploying</h2>
+<div class="sourceCode" id="cb4"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="ex">./deploy/deploy-remote.sh</span>            <span class="co"># push the branch and deploy</span></span>
+<span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a><span class="ex">./deploy/deploy-remote.sh</span> <span class="at">--no-push</span>  <span class="co"># deploy what is already on the branch</span></span>
+<span id="cb4-3"><a href="#cb4-3" aria-hidden="true" tabindex="-1"></a><span class="ex">./deploy/deploy-remote.sh</span> users      <span class="co"># only rewrite the broker accounts</span></span></code></pre></div>
+<h2 id="connecting-the-app">Connecting the app</h2>
+<p>In ChatNyto: <strong>Networks → + →</strong></p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Name</td>
+<td>anything, e.g. “Internet”</td>
+</tr>
+<tr>
+<td>Host</td>
+<td><code>wss://&lt;your domain&gt;/mqtt</code></td>
+</tr>
+<tr>
+<td>Port</td>
+<td>leave 1883; the URL’s scheme decides (443 for <code>wss</code>)</td>
+</tr>
+<tr>
+<td>Username / Password</td>
+<td>one of the <code>MQTT_USERS</code> pairs</td>
+</tr>
+</tbody>
+</table>
+<p>Or share it by QR code from the network’s long-press menu — the code
+carries the address and credentials, so the other person scans it and is
+connected.</p>
+<h2 id="adding-or-removing-people">Adding or removing people</h2>
+<p>Edit <code>MQTT_USERS</code> in <code>deploy/.env.prod</code>,
+then:</p>
+<div class="sourceCode" id="cb5"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="ex">./deploy/deploy-remote.sh</span> users</span></code></pre></div>
+<p>The password file is rebuilt from that variable, so it is the single
+source of truth and removing someone from it removes their access.</p>
+<h2 id="what-the-server-can-and-cannot-see">What the server can and
+cannot see</h2>
+<p>It relays ciphertext: message contents, group names and identities
+are encrypted end-to-end, and the broker holds no keys. It does see the
+metadata any relay sees — which accounts connect, when, and which topics
+they use. Connection logging is turned off in
+<code>mosquitto.conf</code> to keep as little of that as possible. For
+conversations where even metadata matters, use the LoRa box or a broker
+on your own network instead.</p>

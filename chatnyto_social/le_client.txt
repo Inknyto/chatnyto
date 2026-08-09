@@ -1,0 +1,17 @@
+Le client:
+
+Vous pouvez dès lors choisir votre framework de développement favori:
+
+Les frameworks disponibles sont:
+-	django,
+-	flutter,
+-	pyqt,
+-	react,
+-	react_native,
+-	ncurses 
+-	et des scripts shell pour ceux qui préférent travailler avec le terminal.
+
+Votre client devra souscrire au topic 'chat' sur localhost (ou l'adresse à
+laquelle votre broker focntionne). 
+Il devra aussi avoir la possibilité de publier à ce topic. Ceci est la
+première étape
