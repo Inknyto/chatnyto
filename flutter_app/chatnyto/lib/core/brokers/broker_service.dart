@@ -216,6 +216,10 @@ class BrokerService extends ChangeNotifier {
 
   /// Fingerprint → name of the broker whose presence topic announced them.
   final Map<String, String> _peerNetwork = {};
+
+  /// Fingerprint → when they last announced their presence (for online/offline status).
+  final Map<String, DateTime> _peerLastSeen = {};
+
   final Map<String, PublicGroupAd> _publicGroups = {};
   bool _loaded = false;
   Timer? _heartbeat;
@@ -259,6 +263,14 @@ class BrokerService extends ChangeNotifier {
 
   /// Which network a peer was last heard on, empty when unknown.
   String networkOf(String fingerprint) => _peerNetwork[fingerprint] ?? '';
+
+  /// Whether a peer is online: seen advertising their presence recently (within ~60s).
+  /// Unknown peers are considered offline.
+  bool isOnline(String fingerprint) {
+    final lastSeen = _peerLastSeen[fingerprint];
+    if (lastSeen == null) return false;
+    return DateTime.now().difference(lastSeen).inSeconds < 60;
+  }
 
   bool isConnected(Broker broker) =>
       _clients[broker.name]?.connectionStatus?.state ==
@@ -469,6 +481,8 @@ class BrokerService extends ChangeNotifier {
             // Remembering which broker carried the announcement is what
             // lets the network map show who is reachable through what.
             _peerNetwork[identity.fingerprint] = broker.name;
+            // Track when they were last seen for online/offline status.
+            _peerLastSeen[identity.fingerprint] = DateTime.now();
             notifyListeners();
           }
         } catch (_) {

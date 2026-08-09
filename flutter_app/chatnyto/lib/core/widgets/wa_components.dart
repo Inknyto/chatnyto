@@ -22,6 +22,7 @@ class WaChatTile extends StatelessWidget {
     this.avatar,
     this.onTap,
     this.onLongPress,
+    this.online,
   });
 
   final String title;
@@ -38,6 +39,9 @@ class WaChatTile extends StatelessWidget {
   final String? avatar;
   final VoidCallback? onTap;
   final VoidCallback? onLongPress;
+
+  /// Online status: null = no indicator, true = green dot, false = gray dot.
+  final bool? online;
 
   @override
   Widget build(BuildContext context) {
@@ -56,6 +60,7 @@ class WaChatTile extends StatelessWidget {
           avatar: avatar,
           icon: leadingIcon,
           viewable: false,
+          online: online,
         ),
         title: Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,

@@ -23,6 +23,7 @@ class PersonAvatar extends StatelessWidget {
     this.icon,
     this.viewable = true,
     this.onTap,
+    this.online,
   });
 
   final String name;
@@ -41,6 +42,9 @@ class PersonAvatar extends StatelessWidget {
 
   /// Overrides the tap entirely.
   final VoidCallback? onTap;
+
+  /// Online status: null = no indicator, true = green dot, false = gray dot.
+  final bool? online;
 
   @override
   Widget build(BuildContext context) {
@@ -64,6 +68,31 @@ class PersonAvatar extends StatelessWidget {
                   ),
           );
 
+    // Add online status indicator if provided
+    final avatar = online != null
+        ? Stack(
+            children: [
+              circle,
+              Positioned(
+                bottom: 0,
+                right: 0,
+                child: Container(
+                  width: radius * 0.45,
+                  height: radius * 0.45,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: online! ? Colors.greenAccent : Colors.grey,
+                    border: Border.all(
+                      color: Theme.of(context).scaffoldBackgroundColor,
+                      width: 2,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          )
+        : circle;
+
     final action = onTap ??
         (viewable && picture != null
             ? () => Navigator.of(context).push(
@@ -76,11 +105,11 @@ class PersonAvatar extends StatelessWidget {
                   ),
                 )
             : null);
-    if (action == null) return circle;
+    if (action == null) return avatar;
     return InkWell(
       customBorder: const CircleBorder(),
       onTap: action,
-      child: circle,
+      child: avatar,
     );
   }
 }

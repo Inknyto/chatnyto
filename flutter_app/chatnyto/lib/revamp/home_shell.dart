@@ -783,6 +783,9 @@ class _PeopleTabState extends State<PeopleTab> {
                 // Same gesture as the chat list: hold for what you can do
                 // with this row, rather than a menu hidden one level down.
                 onLongPress: () => _contactOptions(peer),
+                online: onAir.contains(peer.x25519PublicKey)
+                    ? _brokers.isOnline(peer.fingerprint)
+                    : null,
               ),
             if (peers.isEmpty)
               const Padding(

@@ -683,3 +683,6 @@ fall back to MQTT relay when direct WebRTC fails, or use configured TURN server.
 Add voice messages in chat, video calls and statuses in updates . . — Framework for status
 indicators added (peer presence tracking ready), voice messages and video calling remain as
 future enhancements (substantial features requiring capture/playback UI and WebRTC video track). 
+Add device manipulation capabilities like kdeconnect, and also a remote compatible to
+multiple tvs and make it able to add, configure and manipulate multiple IOT devices in the
+IOT section of the communities tab.
