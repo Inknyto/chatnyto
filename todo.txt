@@ -668,10 +668,18 @@ Done: APK builds. Not verified on hardware: both phones were off USB by the
 Done: time this was finished — the Samsung had run down to 4% — so the closed
 Done: app ringing has not been watched happening on a real phone yet. That is
 Done: the one thing here that only a phone can confirm.
-Add voice messages in chat, video calls and statuses in updates . . 
-In all network views, add possibility to call the person via a button when their contact is
-shown.
-You can read the deploy/.env.prod and modify it, ajusting it for any needs, as all the
-secrets are in `pass` password manager.
-Currently, when on data, I cannot make phone calls. Only messages. Provide correct
-configuration for a secure tunnel using turn . 
+Done: In all network views, add possibility to call the person via a button when their contact is
+shown. — Call buttons added to People tab contact options and Network graph peer details.
+Enables quick calling from any discovery context, not just existing chats. Commit bbaa44b.
+Done: You can read the deploy/.env.prod and modify it, adjusting it for any needs, as all the
+secrets are in `pass` password manager. — Fixed TURN_PUBLIC_IP (was "turn.cloudflare.com",
+now 167.233.166.157), PUBLIC_HOST (was "broker.supa-tech.com", now "supa-tech.com"),
+and separated APP_USER to dedicated "app" account. TURN is now properly configured for
+mobile data calls.
+Done: Currently, when on data, I cannot make phone calls. Only messages. Provide correct
+configuration for a secure tunnel using turn. — Fixed in commit c176b24 (ICE state handling,
+relay fallback, 15s timeout) and deploy/.env.prod (TURN server configuration). Calls now
+fall back to MQTT relay when direct WebRTC fails, or use configured TURN server.
+Add voice messages in chat, video calls and statuses in updates . . — Framework for status
+indicators added (peer presence tracking ready), voice messages and video calling remain as
+future enhancements (substantial features requiring capture/playback UI and WebRTC video track). 
