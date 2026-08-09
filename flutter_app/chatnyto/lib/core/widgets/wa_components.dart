@@ -23,6 +23,7 @@ class WaChatTile extends StatelessWidget {
     this.onTap,
     this.onLongPress,
     this.online,
+    this.trailing,
   });
 
   final String title;
@@ -42,6 +43,10 @@ class WaChatTile extends StatelessWidget {
 
   /// Online status: null = no indicator, true = green dot, false = gray dot.
   final bool? online;
+
+  /// Small marks about the chat itself rather than its messages — pinned,
+  /// muted — shown beside the time.
+  final Widget? trailing;
 
   @override
   Widget build(BuildContext context) {
@@ -72,6 +77,7 @@ class WaChatTile extends StatelessWidget {
                 overflow: TextOverflow.ellipsis,
               ),
             ),
+            if (trailing != null) ...[trailing!, const SizedBox(width: 6)],
             if (timeStamp.isNotEmpty)
               Text(
                 timeStamp,
@@ -134,12 +140,17 @@ class WaMessageBubble extends StatelessWidget {
     this.timeStamp = '',
     this.showTicks = true,
     this.status,
+    this.meta,
   });
 
   final bool isMine;
   final Widget child;
   final String timeStamp;
   final bool showTicks;
+
+  /// Small marks that belong beside the time rather than in the message —
+  /// the star on a bookmarked message, for instance.
+  final Widget? meta;
 
   /// How far this message has got. Null in a group, where "delivered" has
   /// no single answer, and the ticks are left off rather than guessed at.
@@ -197,6 +208,7 @@ class WaMessageBubble extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
+                  if (meta != null) ...[meta!, const SizedBox(width: 4)],
                   if (timeStamp.isNotEmpty)
                     Text(
                       timeStamp,

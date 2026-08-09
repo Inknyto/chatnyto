@@ -3,27 +3,36 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'voice_note.dart';
+import 'voice_waveform.dart';
 
 /// What came out of a recording.
 class VoiceRecording {
-  VoiceRecording(this.bytes, this.duration);
+  VoiceRecording(this.bytes, this.duration, this.waveform);
 
   final Uint8List bytes;
   final Duration duration;
+
+  /// The shape of it, one byte a bar, to be sent with the message.
+  final Uint8List waveform;
 }
 
 /// The record button and the bar it turns the composer into.
 ///
-/// The gesture is the one people already have in their hands: hold to
+/// The gesture is the one people already have in their hands: touch to
 /// record, let go to send, slide left to throw it away, slide up to lock so
 /// it keeps recording without a finger held down. Every one of those has a
 /// visible affordance while it is happening — a hint that says what sliding
 /// does, a lock that fills as you approach it — because a gesture nobody is
 /// told about is a gesture nobody uses.
 ///
-/// Anything shorter than [_tooShort] is discarded with a word about why.
-/// Without that, a mistimed tap sends a quarter-second of nothing, and the
-/// only way to take it back is to delete a message.
+/// It listens to the raw pointer rather than to a long-press recogniser, and
+/// that is the whole reason the slides work. A long press is rejected the
+/// moment the finger travels more than a touch slop before it is accepted —
+/// so pressing the microphone and sliding up in one movement, which is
+/// exactly how the gesture is performed, used to start no recording at all.
+/// Recording therefore begins on touch down, and anything shorter than
+/// [_tooShort] is thrown away with a word about why, so a stray tap costs
+/// nothing.
 class VoiceComposer extends StatefulWidget {
   const VoiceComposer({
     super.key,
@@ -55,15 +64,28 @@ class VoiceComposerState extends State<VoiceComposer> {
   bool _recording = false;
   bool _locked = false;
   bool _starting = false;
+
+  /// Set when the finger comes up while the microphone is still being
+  /// opened. Opening it crosses a platform channel and takes a moment, and
+  /// a quick tap easily beats it — without this the recorder would be left
+  /// running with nobody holding it.
+  bool _releasedEarly = false;
+  bool _cancelledEarly = false;
+
   Duration _elapsed = Duration.zero;
   double _level = 0;
+  Offset _origin = Offset.zero;
   Offset _drag = Offset.zero;
   Timer? _ticker;
+  List<double> _samples = const [];
 
   bool get recording => _recording;
   bool get locked => _locked;
   Duration get elapsed => _elapsed;
   double get level => _level;
+
+  /// The readings so far, for the meter beside the composer.
+  List<double> get samples => _samples;
 
   /// How close the finger is to cancelling or locking, 0..1, for the hints.
   double get cancelProgress =>
@@ -81,11 +103,25 @@ class VoiceComposerState extends State<VoiceComposer> {
   Future<void> _begin() async {
     if (_recording || _starting) return;
     _starting = true;
+    _releasedEarly = false;
+    _cancelledEarly = false;
     final started = await VoiceNotes.instance.start();
     _starting = false;
-    if (!mounted) return;
+    if (!mounted) {
+      await VoiceNotes.instance.cancel();
+      return;
+    }
     if (!started) {
-      _complain('Microphone permission is needed to record a voice message.');
+      if (!_cancelledEarly) {
+        _complain('Microphone permission is needed to record a voice message.');
+      }
+      return;
+    }
+    // The finger was already gone before the microphone opened. Whatever it
+    // caught is a fraction of a second of nothing.
+    if (_releasedEarly || _cancelledEarly) {
+      await VoiceNotes.instance.cancel();
+      if (mounted && _releasedEarly) _complain('Hold to record a voice note.');
       return;
     }
     HapticFeedback.mediumImpact();
@@ -94,6 +130,7 @@ class VoiceComposerState extends State<VoiceComposer> {
       _locked = false;
       _elapsed = Duration.zero;
       _drag = Offset.zero;
+      _samples = const [];
     });
     widget.onRecordingChanged(true);
     _ticker = Timer.periodic(const Duration(milliseconds: 100), (_) async {
@@ -103,6 +140,7 @@ class VoiceComposerState extends State<VoiceComposer> {
       setState(() {
         _elapsed += const Duration(milliseconds: 100);
         _level = level;
+        _samples = VoiceNotes.instance.samples;
       });
       widget.onTick();
       // The cap is enforced here rather than refused later, so a long note
@@ -113,9 +151,14 @@ class VoiceComposerState extends State<VoiceComposer> {
 
   /// Stops and sends, unless it was too short to have been meant.
   Future<void> finish() async {
+    if (_starting) {
+      _releasedEarly = true;
+      return;
+    }
     if (!_recording) return;
     _ticker?.cancel();
     final held = _elapsed;
+    final shape = VoiceNotes.instance.waveform();
     setState(() {
       _recording = false;
       _locked = false;
@@ -125,7 +168,7 @@ class VoiceComposerState extends State<VoiceComposer> {
     final bytes = await VoiceNotes.instance.stop();
     if (!mounted) return;
     if (held < _tooShort) {
-      _complain('Hold the microphone to record.');
+      _complain('Hold to record a voice note.');
       return;
     }
     if (bytes == null) {
@@ -133,10 +176,14 @@ class VoiceComposerState extends State<VoiceComposer> {
       return;
     }
     HapticFeedback.lightImpact();
-    widget.onRecorded(VoiceRecording(bytes, held));
+    widget.onRecorded(VoiceRecording(bytes, held, shape));
   }
 
   Future<void> discard() async {
+    if (_starting) {
+      _cancelledEarly = true;
+      return;
+    }
     if (!_recording) return;
     _ticker?.cancel();
     setState(() {
@@ -154,15 +201,19 @@ class VoiceComposerState extends State<VoiceComposer> {
         .showSnackBar(SnackBar(content: Text(message)));
   }
 
-  void _onDragUpdate(DragUpdateDetails details) {
+  /// Follows the finger. Measured from where it first touched down rather
+  /// than accumulated from deltas, so a slide that overshoots and comes back
+  /// un-arms the gesture instead of staying triggered.
+  void _onMove(Offset position) {
     if (!_recording || _locked) return;
-    setState(() => _drag += details.delta);
+    setState(() => _drag = position - _origin);
     if (lockProgress >= 1) {
       HapticFeedback.mediumImpact();
       setState(() {
         _locked = true;
         _drag = Offset.zero;
       });
+      widget.onTick();
     } else if (cancelProgress >= 1) {
       discard();
     }
@@ -184,26 +235,30 @@ class VoiceComposerState extends State<VoiceComposer> {
       );
     }
 
-    return GestureDetector(
-      onLongPressStart: (_) => _begin(),
-      onLongPressEnd: (_) => finish(),
-      onLongPressMoveUpdate: (details) {
-        if (!_recording || _locked) return;
-        setState(() => _drag = details.offsetFromOrigin);
-        if (lockProgress >= 1) {
-          HapticFeedback.mediumImpact();
-          setState(() {
-            _locked = true;
-            _drag = Offset.zero;
-          });
-        } else if (cancelProgress >= 1) {
-          discard();
-        }
+    // Listener, not GestureDetector: see the note on the class. Nothing here
+    // enters the gesture arena, so no recogniser above can take the pointer
+    // away mid-slide and no slop threshold can reject the press.
+    return Listener(
+      onPointerDown: (event) {
+        _origin = event.position;
+        _drag = Offset.zero;
+        _begin();
       },
-      onPanUpdate: _onDragUpdate,
-      // A plain tap is the commonest mistake here, so it says what to do
-      // rather than doing nothing.
-      onTap: () => _complain('Hold to record a voice message.'),
+      onPointerMove: (event) => _onMove(event.position),
+      // The lock check is not belt and braces. Locking swaps this widget out
+      // for the send button, but the framework goes on delivering the rest
+      // of that pointer's events to the route it hit on the way down — so
+      // without this, sliding up to go hands-free and then lifting the
+      // finger would send the note on the spot, which is the opposite of
+      // what locking is for.
+      onPointerUp: (_) {
+        if (!_locked) finish();
+      },
+      // A pointer the system takes back — a notification pulled down over
+      // the app, a call arriving — is not a send.
+      onPointerCancel: (_) {
+        if (!_locked) discard();
+      },
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 150),
         decoration: BoxDecoration(
@@ -242,6 +297,7 @@ class VoiceRecordingStrip extends StatelessWidget {
     required this.locked,
     required this.cancelProgress,
     required this.lockProgress,
+    this.samples = const [],
   });
 
   final Duration elapsed;
@@ -249,6 +305,10 @@ class VoiceRecordingStrip extends StatelessWidget {
   final bool locked;
   final double cancelProgress;
   final double lockProgress;
+
+  /// The loudness readings so far — the same ones that will be sent with the
+  /// note, so what is drawn while recording is what the bubble will show.
+  final List<double> samples;
 
   @override
   Widget build(BuildContext context) {
@@ -278,32 +338,53 @@ class VoiceRecordingStrip extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 10),
-          Expanded(child: _Meter(level: level)),
+          Expanded(
+            child: LiveWaveform(
+              samples: samples,
+              color: scheme.primary.withValues(alpha: 0.75),
+            ),
+          ),
           const SizedBox(width: 10),
           if (locked)
-            Text(
-              'hands free',
-              style: TextStyle(
-                fontSize: 12,
-                color: scheme.onSurface.withValues(alpha: 0.7),
-              ),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.lock_rounded, size: 14, color: scheme.primary),
+                const SizedBox(width: 4),
+                Text(
+                  'hands free',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: scheme.onSurface.withValues(alpha: 0.7),
+                  ),
+                ),
+              ],
             )
           else
             Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                // The lock fills as the finger rises towards it, which is
-                // the only way to discover the gesture exists.
-                Opacity(
-                  opacity: 0.4 + lockProgress * 0.6,
-                  child: Icon(
-                    lockProgress > 0.5
-                        ? Icons.lock_rounded
-                        : Icons.lock_open_rounded,
-                    size: 15,
+                // The lock rises and fills as the finger goes up towards it,
+                // which is the only way to discover the gesture exists.
+                Transform.translate(
+                  offset: Offset(0, -6 * lockProgress),
+                  child: Opacity(
+                    opacity: 0.4 + lockProgress * 0.6,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.keyboard_arrow_up_rounded, size: 14),
+                        Icon(
+                          lockProgress > 0.5
+                              ? Icons.lock_rounded
+                              : Icons.lock_open_rounded,
+                          size: 15,
+                        ),
+                      ],
+                    ),
                   ),
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: 10),
                 const Icon(Icons.chevron_left_rounded, size: 16),
                 Text(
                   'slide to cancel',
@@ -313,45 +394,6 @@ class VoiceRecordingStrip extends StatelessWidget {
                   ),
                 ),
               ],
-            ),
-        ],
-      ),
-    );
-  }
-}
-
-/// A live level meter, so the user can see the microphone is working.
-class _Meter extends StatelessWidget {
-  const _Meter({required this.level});
-
-  final double level;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return SizedBox(
-      height: 20,
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          for (var bar = 0; bar < 18; bar++)
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 1),
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 120),
-                  // Bars nearer the middle react more, so the shape reads as
-                  // a voice rather than a row of equal blocks.
-                  height: 3 +
-                      level *
-                          16 *
-                          (1 - (bar - 8.5).abs() / 10).clamp(0.2, 1.0),
-                  decoration: BoxDecoration(
-                    color: scheme.primary.withValues(alpha: 0.7),
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-              ),
             ),
         ],
       ),

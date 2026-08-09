@@ -153,6 +153,12 @@ class ChatsTab extends StatefulWidget {
 class _ChatsTabState extends State<ChatsTab> {
   final ChatService _service = ChatService.instance;
 
+  /// What the user is looking for. The field appears above the list rather
+  /// than replacing the header, so it is obvious that the list below it has
+  /// been narrowed rather than emptied.
+  final TextEditingController _search = TextEditingController();
+  String _query = '';
+
   @override
   void initState() {
     super.initState();
@@ -163,11 +169,25 @@ class _ChatsTabState extends State<ChatsTab> {
   @override
   void dispose() {
     _service.removeListener(_onChanged);
+    _search.dispose();
     super.dispose();
   }
 
   void _onChanged() {
     if (mounted) setState(() {});
+  }
+
+  /// The chats worth showing: everything, or what matches by name or by what
+  /// was last said in it.
+  List<ChatEntry> get _visible {
+    final needle = _query.trim().toLowerCase();
+    final chats = _service.chats;
+    if (needle.isEmpty) return chats;
+    return chats
+        .where((c) =>
+            c.title.toLowerCase().contains(needle) ||
+            c.lastMessage.toLowerCase().contains(needle))
+        .toList();
   }
 
   Future<void> _newGroup() async {
@@ -288,6 +308,29 @@ class _ChatsTabState extends State<ChatsTab> {
                 },
               ),
             ListTile(
+              leading: Icon(chat.pinned
+                  ? Icons.push_pin_rounded
+                  : Icons.push_pin_outlined),
+              title: Text(chat.pinned ? 'Unpin' : 'Pin to top'),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                _service.setPinned(chat, !chat.pinned);
+              },
+            ),
+            ListTile(
+              leading: Icon(chat.muted
+                  ? Icons.notifications_off_rounded
+                  : Icons.notifications_active_outlined),
+              title: Text(chat.muted ? 'Unmute' : 'Mute notifications'),
+              subtitle: Text(chat.muted
+                  ? 'Notifications are on again for this chat.'
+                  : 'Messages still arrive and still count as unread.'),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                _service.setMuted(chat, !chat.muted);
+              },
+            ),
+            ListTile(
               leading: const Icon(Icons.wallpaper_rounded),
               title: Text(l10n.wallpaperForChat),
               onTap: () {
@@ -374,50 +417,107 @@ class _ChatsTabState extends State<ChatsTab> {
 
   @override
   Widget build(BuildContext context) {
-    final chats = _service.chats;
+    final chats = _visible;
+    final searching = _query.trim().isNotEmpty;
+    final scheme = Theme.of(context).colorScheme;
     return Scaffold(
       backgroundColor: Colors.transparent,
-      body: chats.isEmpty
-          ? Center(
-              child: LiquidGlass(
-                margin: const EdgeInsets.all(24),
-                padding: const EdgeInsets.all(20),
-                child: Text(
-                  AppLocalizations.of(context).chatsEmpty,
-                  textAlign: TextAlign.center,
+      body: Column(
+        children: [
+          // Only worth the room once there is a list to sift.
+          if (_service.chats.length > 4 || searching)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+              child: TextField(
+                controller: _search,
+                decoration: InputDecoration(
+                  prefixIcon: const Icon(Icons.search_rounded, size: 20),
+                  hintText: 'Search chats',
+                  isDense: true,
+                  border: const OutlineInputBorder(),
+                  suffixIcon: searching
+                      ? IconButton(
+                          icon: const Icon(Icons.close_rounded, size: 18),
+                          onPressed: () {
+                            _search.clear();
+                            setState(() => _query = '');
+                          },
+                        )
+                      : null,
                 ),
+                onChanged: (value) => setState(() => _query = value),
               ),
-            )
-          : ListView.builder(
-              padding: const EdgeInsets.symmetric(vertical: 6),
-              itemCount: chats.length,
-              itemBuilder: (context, index) {
-                final chat = chats[index];
-                final time = chat.lastTs == 0
-                    ? ''
-                    : RevampMessage(
-                        from: '', name: '', text: '', ts: chat.lastTs)
-                        .timeLabel;
-                return WaChatTile(
-                  title: chat.title,
-                  avatar: chat.peerIdentity?.avatar,
-                  subtitle: chat.lastMessage.isEmpty
-                      ? (chat.isDm
-                          ? AppLocalizations.of(context).sayHello
-                          : AppLocalizations.of(context).groupSubtitle)
-                      : chat.lastMessage,
-                  timeStamp: time,
-                  unreadCount: chat.unread,
-                  lastStatus: chat.isDm ? chat.lastStatus : null,
-                  leadingIcon: chat.isDm ? null : Icons.groups_rounded,
-                  onTap: () => Navigator.push(
-                    context,
-                    GlassPageRoute(page: RevampChatPage(chat: chat)),
-                  ),
-                  onLongPress: () => _showChatOptions(chat),
-                );
-              },
             ),
+          Expanded(
+            child: chats.isEmpty
+                ? Center(
+                    child: LiquidGlass(
+                      margin: const EdgeInsets.all(24),
+                      padding: const EdgeInsets.all(20),
+                      child: Text(
+                        searching
+                            ? 'No chat matches that.'
+                            : AppLocalizations.of(context).chatsEmpty,
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                  )
+                : ListView.builder(
+                    padding: const EdgeInsets.symmetric(vertical: 6),
+                    itemCount: chats.length,
+                    itemBuilder: (context, index) {
+                      final chat = chats[index];
+                      final time = chat.lastTs == 0
+                          ? ''
+                          : RevampMessage(
+                                  from: '', name: '', text: '', ts: chat.lastTs)
+                              .timeLabel;
+                      return WaChatTile(
+                        title: chat.title,
+                        avatar: chat.peerIdentity?.avatar,
+                        // Somebody writing to you now outranks whatever they
+                        // last finished writing.
+                        subtitle: _service.isTyping(chat.id)
+                            ? 'typing…'
+                            : chat.lastMessage.isEmpty
+                                ? (chat.isDm
+                                    ? AppLocalizations.of(context).sayHello
+                                    : AppLocalizations.of(context)
+                                        .groupSubtitle)
+                                : chat.lastMessage,
+                        timeStamp: time,
+                        unreadCount: chat.unread,
+                        lastStatus: chat.isDm ? chat.lastStatus : null,
+                        leadingIcon:
+                            chat.isDm ? null : Icons.groups_rounded,
+                        trailing: chat.pinned || chat.muted
+                            ? Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  if (chat.muted)
+                                    Icon(Icons.notifications_off_rounded,
+                                        size: 14,
+                                        color: scheme.onSurface
+                                            .withValues(alpha: 0.5)),
+                                  if (chat.pinned)
+                                    Icon(Icons.push_pin_rounded,
+                                        size: 14,
+                                        color: scheme.onSurface
+                                            .withValues(alpha: 0.5)),
+                                ],
+                              )
+                            : null,
+                        onTap: () => Navigator.push(
+                          context,
+                          GlassPageRoute(page: RevampChatPage(chat: chat)),
+                        ),
+                        onLongPress: () => _showChatOptions(chat),
+                      );
+                    },
+                  ),
+          ),
+        ],
+      ),
       floatingActionButton: FloatingActionButton(
         onPressed: _newGroup,
         tooltip: AppLocalizations.of(context).newGroup,

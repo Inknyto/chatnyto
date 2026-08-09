@@ -12,6 +12,7 @@ import '../core/media/image_service.dart';
 import '../core/media/image_viewer.dart';
 import '../core/media/voice_composer.dart';
 import '../core/media/voice_note.dart';
+import '../core/media/voice_waveform.dart';
 import '../core/notifications/notification_service.dart';
 import '../core/settings/wallpaper_picker.dart';
 import '../core/theme/background_controller.dart';
@@ -52,6 +53,18 @@ class _RevampChatPageState extends State<RevampChatPage> {
   /// button between "send" and "hold to record", the way a messenger does.
   bool _hasText = false;
 
+  /// The message being answered, shown quoted above the composer until it is
+  /// sent or dismissed.
+  RevampMessage? _replyTo;
+
+  /// A message that was just jumped to from a quote, flashed briefly so the
+  /// eye can find it in a wall of bubbles.
+  String? _highlighted;
+
+  /// One key per message that has been built, so a quote can scroll back to
+  /// the message it quotes.
+  final Map<String, GlobalKey> _messageKeys = {};
+
   final GlobalKey<VoiceComposerState> _voiceKey =
       GlobalKey<VoiceComposerState>();
 
@@ -70,6 +83,10 @@ class _RevampChatPageState extends State<RevampChatPage> {
   void _onTyped() {
     final has = _editorController.document.toPlainText().trim().isNotEmpty;
     if (has != _hasText) setState(() => _hasText = has);
+    // Called on every keystroke; the service does the throttling, because
+    // how often to say it is a property of the protocol rather than of this
+    // screen.
+    _service.setTyping(widget.chat, has);
   }
 
   @override
@@ -78,6 +95,8 @@ class _RevampChatPageState extends State<RevampChatPage> {
       NotificationService.instance.activeChatId = null;
     }
     _service.removeListener(_onChanged);
+    // Leaving the screen with half a sentence in the box is not typing.
+    _service.setTyping(widget.chat, false);
     VoiceNotePlayer.instance.stop();
     _editorController.removeListener(_onTyped);
     _editorController.dispose();
@@ -130,7 +149,9 @@ class _RevampChatPageState extends State<RevampChatPage> {
       widget.chat,
       text,
       delta: formatted ? delta : null,
+      replyTo: _replyTo,
     );
+    if (sent && mounted) setState(() => _replyTo = null);
     if (!sent && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -151,7 +172,10 @@ class _RevampChatPageState extends State<RevampChatPage> {
       _voiceLabel,
       audio: base64Encode(recording.bytes),
       audioMs: recording.duration.inMilliseconds,
+      waveform: VoiceNotes.encodeWaveform(recording.waveform),
+      replyTo: _replyTo,
     );
+    if (sent && mounted) setState(() => _replyTo = null);
     if (!sent && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -159,6 +183,398 @@ class _RevampChatPageState extends State<RevampChatPage> {
         ),
       );
     }
+  }
+
+  // ------------------------------------------------- what a message can do
+
+  /// The six a messenger offers. More than this and the row stops being
+  /// something the thumb can hit without reading.
+  static const _reactionChoices = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
+
+  void _startReply(RevampMessage message) {
+    if (message.deleted) return;
+    HapticFeedback.selectionClick();
+    setState(() => _replyTo = message);
+    _editorFocus.requestFocus();
+  }
+
+  /// Scrolls back to the message a quote refers to, and flashes it.
+  ///
+  /// Two steps, because the list only builds what is on screen: an
+  /// approximate jump by position in the conversation first, then — once
+  /// that frame has been laid out and the target actually exists — an exact
+  /// one. A quote whose original was never received (deleted here, or from
+  /// before this device joined) says so rather than doing nothing.
+  Future<void> _jumpTo(String id) async {
+    final index = _messages.indexWhere((m) => m.id == id);
+    if (index < 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('The original message is not here.')),
+      );
+      return;
+    }
+    if (_scrollController.hasClients && _messages.length > 1) {
+      final extent = _scrollController.position.maxScrollExtent;
+      _scrollController.jumpTo(extent * index / (_messages.length - 1));
+      await WidgetsBinding.instance.endOfFrame;
+    }
+    if (!mounted) return;
+    final target = _messageKeys[id]?.currentContext;
+    if (target != null && target.mounted) {
+      await Scrollable.ensureVisible(target,
+          duration: const Duration(milliseconds: 200), alignment: 0.4);
+    }
+    if (!mounted) return;
+    setState(() => _highlighted = id);
+    await Future<void>.delayed(const Duration(milliseconds: 1200));
+    if (mounted && _highlighted == id) setState(() => _highlighted = null);
+  }
+
+  /// Finds a message in this conversation and goes to it.
+  ///
+  /// A sheet rather than a bar over the list: the results have to show who
+  /// said what and when to be worth anything, and a conversation searched
+  /// for "tomorrow" can easily have thirty hits.
+  Future<void> _searchInChat() async {
+    final found = await showModalBottomSheet<RevampMessage>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (context) => _SearchSheet(messages: _messages, myFp: _myFp),
+    );
+    if (found != null) await _jumpTo(found.id);
+  }
+
+  Future<void> _react(RevampMessage message, String emoji) async {
+    HapticFeedback.selectionClick();
+    await _service.react(widget.chat, message, emoji);
+  }
+
+  void _copy(RevampMessage message) {
+    Clipboard.setData(ClipboardData(text: message.text));
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Copied.')),
+    );
+  }
+
+  /// Passes a message on to another conversation. It is sent afresh rather
+  /// than moved: the other chat has its own key, and a forwarded message is
+  /// labelled so nobody mistakes a repetition for the thing itself.
+  Future<void> _forward(RevampMessage message) async {
+    final others =
+        _service.chats.where((c) => c.id != widget.chat.id).toList();
+    if (others.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('There is nowhere else to send it.')),
+      );
+      return;
+    }
+    final target = await showModalBottomSheet<ChatEntry>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const ListTile(
+              dense: true,
+              title: Text('Forward to',
+                  style: TextStyle(fontWeight: FontWeight.bold)),
+            ),
+            Flexible(
+              child: ListView(
+                shrinkWrap: true,
+                children: [
+                  for (final chat in others)
+                    ListTile(
+                      leading: Icon(chat.isDm
+                          ? Icons.person_outline_rounded
+                          : Icons.groups_rounded),
+                      title: Text(chat.title),
+                      onTap: () => Navigator.pop(context, chat),
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (target == null) return;
+    final sent = await _service.sendText(
+      target,
+      message.text,
+      delta: message.delta,
+      image: message.image,
+      audio: message.audio,
+      audioMs: message.audioMs,
+      waveform: message.waveform,
+      forwarded: true,
+    );
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(sent ? 'Sent to ${target.title}.' : 'Could not send it.'),
+      ),
+    );
+  }
+
+  Future<void> _delete(RevampMessage message, bool mine) async {
+    final choice = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete message?'),
+        content: Text(mine
+            ? 'Taking it back removes it from both devices. Deleting it here '
+                'leaves the copy the other person already has.'
+            : 'It is removed from this device. The person who sent it keeps '
+                'their copy — only they can take it back.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text(AppLocalizations.of(context).cancel),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, 'me'),
+            child: const Text('Delete for me'),
+          ),
+          if (mine)
+            FilledButton(
+              onPressed: () => Navigator.pop(context, 'everyone'),
+              child: const Text('Delete for everyone'),
+            ),
+        ],
+      ),
+    );
+    if (choice == null) return;
+    if (choice == 'me') {
+      await _service.deleteForMe(widget.chat, message);
+      return;
+    }
+    final error = await _service.deleteForEveryone(widget.chat, message);
+    if (error != null && mounted) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(error)));
+    }
+  }
+
+  /// The long-press sheet: the reactions first, because they are what the
+  /// gesture is most often for, then the things done to a message.
+  void _openActions(RevampMessage message, bool mine) {
+    HapticFeedback.mediumImpact();
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheet) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (!message.deleted)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: [
+                    for (final emoji in _reactionChoices)
+                      IconButton(
+                        onPressed: () {
+                          Navigator.pop(sheet);
+                          _react(message, emoji);
+                        },
+                        icon: Text(emoji,
+                            style: const TextStyle(fontSize: 24)),
+                      ),
+                  ],
+                ),
+              ),
+            const Divider(height: 8),
+            if (!message.deleted)
+              ListTile(
+                leading: const Icon(Icons.reply_rounded),
+                title: const Text('Reply'),
+                onTap: () {
+                  Navigator.pop(sheet);
+                  _startReply(message);
+                },
+              ),
+            if (!message.deleted && message.text.isNotEmpty)
+              ListTile(
+                leading: const Icon(Icons.copy_rounded),
+                title: const Text('Copy'),
+                onTap: () {
+                  Navigator.pop(sheet);
+                  _copy(message);
+                },
+              ),
+            if (!message.deleted)
+              ListTile(
+                leading: const Icon(Icons.forward_rounded),
+                title: const Text('Forward'),
+                onTap: () {
+                  Navigator.pop(sheet);
+                  _forward(message);
+                },
+              ),
+            if (!message.deleted)
+              ListTile(
+                leading: Icon(message.starred
+                    ? Icons.star_rounded
+                    : Icons.star_border_rounded),
+                title: Text(message.starred ? 'Unstar' : 'Star'),
+                onTap: () {
+                  Navigator.pop(sheet);
+                  _service.toggleStar(widget.chat, message);
+                },
+              ),
+            ListTile(
+              leading: const Icon(Icons.delete_outline_rounded),
+              title: const Text('Delete'),
+              onTap: () {
+                Navigator.pop(sheet);
+                _delete(message, mine);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// One message: the bubble, whatever hangs off it, and the two gestures
+  /// that reach it.
+  ///
+  /// The drag-to-reply is a [Dismissible] that never dismisses. It is the
+  /// only widget in the framework that gives a horizontal drag with a
+  /// rubber-band return and a threshold for free, and refusing the dismissal
+  /// in [Dismissible.confirmDismiss] is what turns "swipe away" into "swipe
+  /// and let go" — which is the gesture people already have for replying.
+  Widget _buildMessage(RevampMessage message, ColorScheme scheme) {
+    final mine = message.from.isNotEmpty && message.from == _myFp;
+    final key = _messageKeys.putIfAbsent(message.id, GlobalKey.new);
+    final highlighted = _highlighted == message.id;
+
+    final bubble = WaMessageBubble(
+      isMine: mine,
+      timeStamp: message.deleted ? '' : message.timeLabel,
+      // Only in a one-to-one chat: a group has no single "they have it", so
+      // it shows no ticks at all.
+      status: widget.chat.isDm && !message.deleted ? message.status : null,
+      meta: message.starred
+          ? Icon(Icons.star_rounded,
+              size: 12, color: scheme.onSurface.withValues(alpha: 0.55))
+          : null,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (!mine && !widget.chat.isDm && !message.deleted)
+            Text(
+              message.name,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+                color: scheme.primary,
+              ),
+            ),
+          if (message.forwarded && !message.deleted)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 2),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.forward_rounded,
+                      size: 13,
+                      color: scheme.onSurface.withValues(alpha: 0.55)),
+                  const SizedBox(width: 4),
+                  Text(
+                    'Forwarded',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontStyle: FontStyle.italic,
+                      color: scheme.onSurface.withValues(alpha: 0.55),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          if (message.isReply && !message.deleted)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: _QuotedMessage(
+                // An anonymous message has an id beginning with '-', which
+                // an empty fingerprint would match — so nobody is "You"
+                // until we know who we are.
+                author: _myFp.isNotEmpty &&
+                        message.replyTo!.startsWith('$_myFp-')
+                    ? 'You'
+                    : (message.replyName ?? ''),
+                text: message.replyText ?? '',
+                onTap: () => _jumpTo(message.replyTo!),
+              ),
+            ),
+          if (message.deleted)
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.block_rounded,
+                    size: 14,
+                    color: scheme.onSurface.withValues(alpha: 0.5)),
+                const SizedBox(width: 6),
+                Text(
+                  ChatService.deletedLabel,
+                  style: TextStyle(
+                    fontStyle: FontStyle.italic,
+                    color: scheme.onSurface.withValues(alpha: 0.6),
+                  ),
+                ),
+              ],
+            )
+          else
+            _MessageBody(message: message),
+          if (message.reactions.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: _Reactions(
+                reactions: message.reactions,
+                mine: _myFp,
+                onTap: (emoji) => _react(message, emoji),
+              ),
+            ),
+        ],
+      ),
+    );
+
+    return KeyedSubtree(
+      key: key,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 250),
+        color: highlighted
+            ? scheme.primary.withValues(alpha: 0.16)
+            : Colors.transparent,
+        child: Dismissible(
+          key: ValueKey('swipe-${message.id}'),
+          direction: message.deleted
+              ? DismissDirection.none
+              : DismissDirection.startToEnd,
+          dismissThresholds: const {DismissDirection.startToEnd: 0.22},
+          confirmDismiss: (_) async {
+            _startReply(message);
+            return false;
+          },
+          background: Padding(
+            padding: const EdgeInsets.only(left: 22),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Icon(Icons.reply_rounded,
+                  color: scheme.primary.withValues(alpha: 0.8)),
+            ),
+          ),
+          child: GestureDetector(
+            onLongPress: () => _openActions(message, mine),
+            child: bubble,
+          ),
+        ),
+      ),
+    );
   }
 
   /// Renaming a group moves the whole conversation to a new topic, so it is
@@ -491,6 +907,20 @@ class _RevampChatPageState extends State<RevampChatPage> {
                             fontSize: 17, fontWeight: FontWeight.w500),
                         overflow: TextOverflow.ellipsis,
                       ),
+                      // "typing…" takes the whole line while it lasts. It is
+                      // the most perishable thing the header can say, and
+                      // squeezing it in beside the fingerprint would make it
+                      // the least noticeable.
+                      if (_service.isTyping(widget.chat.id))
+                        Text(
+                          'typing…',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontStyle: FontStyle.italic,
+                            color: scheme.primary,
+                          ),
+                        )
+                      else
                       Row(
                         children: [
                           if (peer != null) ...[
@@ -523,6 +953,11 @@ class _RevampChatPageState extends State<RevampChatPage> {
             ),
           ),
           actions: [
+            IconButton(
+              tooltip: 'Search in this chat',
+              icon: const Icon(Icons.search_rounded),
+              onPressed: _searchInChat,
+            ),
             if (widget.chat.isDm) ...[
               IconButton(
                 tooltip: 'Video call',
@@ -594,35 +1029,8 @@ class _RevampChatPageState extends State<RevampChatPage> {
                   controller: _scrollController,
                   padding: const EdgeInsets.symmetric(vertical: 8),
                   itemCount: _messages.length,
-                  itemBuilder: (context, index) {
-                    final message = _messages[index];
-                    final mine = message.from.isNotEmpty
-                        ? message.from == _myFp
-                        : false;
-                    return WaMessageBubble(
-                      isMine: mine,
-                      timeStamp: message.timeLabel,
-                      // Only in a one-to-one chat: a group has no single
-                      // "they have it", so it shows no ticks at all.
-                      status:
-                          widget.chat.isDm ? message.status : null,
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          if (!mine && !widget.chat.isDm)
-                            Text(
-                              message.name,
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.bold,
-                                color: scheme.primary,
-                              ),
-                            ),
-                          _MessageBody(message: message),
-                        ],
-                      ),
-                    );
-                  },
+                  itemBuilder: (context, index) =>
+                      _buildMessage(_messages[index], scheme),
                 ),
               ),
               if (_showToolbar)
@@ -652,6 +1060,30 @@ class _RevampChatPageState extends State<RevampChatPage> {
                       showSubscript: false,
                       showSuperscript: false,
                     ),
+                  ),
+                ),
+              // What is being answered, above the composer, until it is sent
+              // or dismissed — so a reply written a minute later is still
+              // visibly a reply to something.
+              if (_replyTo != null && !_recordingVoice)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(10, 4, 10, 0),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: _QuotedMessage(
+                          author: _myFp.isNotEmpty && _replyTo!.from == _myFp
+                              ? 'You'
+                              : _replyTo!.name,
+                          text: ChatService.quotedPreview(_replyTo!),
+                        ),
+                      ),
+                      IconButton(
+                        tooltip: 'Cancel reply',
+                        icon: const Icon(Icons.close_rounded, size: 18),
+                        onPressed: () => setState(() => _replyTo = null),
+                      ),
+                    ],
                   ),
                 ),
               WaInputBar(
@@ -714,6 +1146,8 @@ class _RevampChatPageState extends State<RevampChatPage> {
                         cancelProgress:
                             _voiceKey.currentState?.cancelProgress ?? 0,
                         lockProgress: _voiceKey.currentState?.lockProgress ?? 0,
+                        samples:
+                            _voiceKey.currentState?.samples ?? const [],
                       )
                     : Padding(
                         padding: const EdgeInsets.symmetric(vertical: 10),
@@ -733,6 +1167,216 @@ class _RevampChatPageState extends State<RevampChatPage> {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// Searching one conversation. Matches are shown newest first, because that
+/// is the half of a conversation anyone is usually looking for.
+class _SearchSheet extends StatefulWidget {
+  const _SearchSheet({required this.messages, required this.myFp});
+
+  final List<RevampMessage> messages;
+  final String myFp;
+
+  @override
+  State<_SearchSheet> createState() => _SearchSheetState();
+}
+
+class _SearchSheetState extends State<_SearchSheet> {
+  String _query = '';
+
+  List<RevampMessage> get _results {
+    final needle = _query.trim().toLowerCase();
+    if (needle.isEmpty) return const [];
+    return widget.messages.reversed
+        .where((m) => !m.deleted && m.text.toLowerCase().contains(needle))
+        .take(80)
+        .toList();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final results = _results;
+    return Padding(
+      padding: EdgeInsets.only(
+        left: 12,
+        right: 12,
+        bottom: MediaQuery.of(context).viewInsets.bottom,
+      ),
+      child: SizedBox(
+        height: MediaQuery.of(context).size.height * 0.6,
+        child: Column(
+          children: [
+            TextField(
+              autofocus: true,
+              decoration: const InputDecoration(
+                prefixIcon: Icon(Icons.search_rounded),
+                hintText: 'Search this conversation',
+                border: OutlineInputBorder(),
+                isDense: true,
+              ),
+              onChanged: (value) => setState(() => _query = value),
+            ),
+            const SizedBox(height: 8),
+            Expanded(
+              child: _query.trim().isEmpty
+                  ? const SizedBox.shrink()
+                  : results.isEmpty
+                      ? Center(
+                          child: Text(
+                            'Nothing matches.',
+                            style: TextStyle(
+                              color:
+                                  scheme.onSurface.withValues(alpha: 0.6),
+                            ),
+                          ),
+                        )
+                      : ListView.builder(
+                          itemCount: results.length,
+                          itemBuilder: (context, index) {
+                            final message = results[index];
+                            return ListTile(
+                              dense: true,
+                              title: Text(
+                                message.from == widget.myFp
+                                    ? 'You'
+                                    : message.name,
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                  color: scheme.primary,
+                                ),
+                              ),
+                              subtitle: Text(
+                                message.text,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              trailing: Text(
+                                message.timeLabel,
+                                style: const TextStyle(fontSize: 11),
+                              ),
+                              onTap: () => Navigator.pop(context, message),
+                            );
+                          },
+                        ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// The quoted block: above the composer while a reply is being written, and
+/// inside the bubble once it has been sent. The same widget in both places
+/// on purpose — what you are answering should look the same before and after
+/// you answer it.
+class _QuotedMessage extends StatelessWidget {
+  const _QuotedMessage({required this.author, required this.text, this.onTap});
+
+  final String author;
+  final String text;
+
+  /// Set inside a bubble, where the quote is a way back to the original.
+  /// Null above the composer, where there is nowhere to go.
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(6),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(8, 5, 8, 5),
+        decoration: BoxDecoration(
+          color: scheme.onSurface.withValues(alpha: 0.06),
+          borderRadius: BorderRadius.circular(6),
+          // The coloured spine is the whole visual grammar of a quote.
+          border: Border(left: BorderSide(color: scheme.primary, width: 3)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (author.isNotEmpty)
+              Text(
+                author,
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                  color: scheme.primary,
+                ),
+              ),
+            Text(
+              text,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 12,
+                color: scheme.onSurface.withValues(alpha: 0.75),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// The reactions on a message, grouped: one pill an emoji, with how many
+/// people chose it. Ours is outlined, so it is obvious which one to tap
+/// again to take it back.
+class _Reactions extends StatelessWidget {
+  const _Reactions({
+    required this.reactions,
+    required this.mine,
+    required this.onTap,
+  });
+
+  /// Fingerprint to emoji.
+  final Map<String, String> reactions;
+
+  /// Our own fingerprint, to find ours among them.
+  final String mine;
+  final ValueChanged<String> onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final counts = <String, int>{};
+    for (final emoji in reactions.values) {
+      counts[emoji] = (counts[emoji] ?? 0) + 1;
+    }
+    final ours = reactions[mine];
+    return Wrap(
+      spacing: 4,
+      children: [
+        for (final entry in counts.entries)
+          InkWell(
+            onTap: () => onTap(entry.key),
+            borderRadius: BorderRadius.circular(10),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: scheme.surface.withValues(alpha: 0.7),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: entry.key == ours
+                      ? scheme.primary
+                      : scheme.onSurface.withValues(alpha: 0.15),
+                ),
+              ),
+              child: Text(
+                entry.value > 1 ? '${entry.key} ${entry.value}' : entry.key,
+                style: const TextStyle(fontSize: 12),
+              ),
+            ),
+          ),
+      ],
     );
   }
 }
@@ -770,6 +1414,7 @@ class _MessageBody extends StatelessWidget {
         id: '${message.from}-${message.ts}',
         bytes: note,
         duration: Duration(milliseconds: message.audioMs),
+        waveform: VoiceNotes.decodeWaveform(message.waveform),
       );
     }
     final picture = ImageService.decode(message.image);
@@ -831,22 +1476,27 @@ class _MessageBody extends StatelessWidget {
 /// have something to say without decoding the audio.
 const _voiceLabel = '🎤 Voice message';
 
-/// A voice note in the conversation: play/pause, a progress bar you can
-/// scrub, and the length.
+/// A voice note in the conversation: play/pause, the shape of what was said,
+/// and the length.
 ///
-/// The bar shows the *sent* length until playback starts, because that is
-/// known from the message itself — waiting for the player to report a
+/// The waveform shows the *sent* length until playback starts, because that
+/// is known from the message itself — waiting for the player to report a
 /// duration would leave every note reading 0:00 until it was opened.
 class _VoiceBubble extends StatelessWidget {
   const _VoiceBubble({
     required this.id,
     required this.bytes,
     required this.duration,
+    this.waveform,
   });
 
   final String id;
   final Uint8List bytes;
   final Duration duration;
+
+  /// The bars measured when the note was recorded, or null for a note that
+  /// arrived without them.
+  final Uint8List? waveform;
 
   @override
   Widget build(BuildContext context) {
@@ -882,28 +1532,22 @@ class _VoiceBubble extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    SliderTheme(
-                      data: SliderTheme.of(context).copyWith(
-                        trackHeight: 3,
-                        thumbShape:
-                            const RoundSliderThumbShape(enabledThumbRadius: 6),
-                        overlayShape:
-                            const RoundSliderOverlayShape(overlayRadius: 12),
-                      ),
-                      child: Slider(
-                        value: progress,
-                        // Scrubbing only makes sense on the note that is
-                        // actually playing; on the others the bar is a
-                        // length indicator and moving it would mean nothing.
-                        onChanged: playing
-                            ? (value) => player.seek(Duration(
-                                milliseconds:
-                                    (total.inMilliseconds * value).round()))
-                            : null,
-                      ),
+                    VoiceWaveform(
+                      bars: waveform,
+                      progress: progress,
+                      played: scheme.primary,
+                      unplayed: scheme.onSurface.withValues(alpha: 0.3),
+                      // Scrubbing only makes sense on the note that is
+                      // actually playing; on the others the bars are a
+                      // picture of it and dragging them would mean nothing.
+                      onSeek: playing
+                          ? (value) => player.seek(Duration(
+                              milliseconds:
+                                  (total.inMilliseconds * value).round()))
+                          : null,
                     ),
                     Padding(
-                      padding: const EdgeInsets.only(left: 8, bottom: 2),
+                      padding: const EdgeInsets.only(top: 2, bottom: 2),
                       child: Text(
                         voiceDurationLabel(playing ? position : total),
                         style: TextStyle(

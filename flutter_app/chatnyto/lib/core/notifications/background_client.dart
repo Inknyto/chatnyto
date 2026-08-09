@@ -254,15 +254,25 @@ class UiPresence {
 const _callType = 'call';
 const _syncType = 'sync_req';
 const _receiptType = 'receipt';
+const _reactionType = 'reaction';
+const _deleteType = 'delete';
+const _typingType = 'typing';
 
 /// Recognises the envelope kinds a listening isolate cares about. Shared
 /// with [ChatService] so the two never disagree about what a ring looks
 /// like.
 bool isCallEnvelope(Map<String, dynamic> data) => data['type'] == _callType;
 
+/// True for envelopes that are about the conversation rather than part of
+/// it. None of these should ever raise a notification: a thumbs-up on a
+/// message, a message being taken back, or somebody starting to type are all
+/// things the app shows when it is looked at, not things worth a buzz.
 bool isPlumbingEnvelope(Map<String, dynamic> data) =>
     data['type'] == _syncType ||
     data['type'] == _receiptType ||
+    data['type'] == _reactionType ||
+    data['type'] == _deleteType ||
+    data['type'] == _typingType ||
     (data['type'] as String? ?? '').startsWith('group_');
 
 /// Decodes a JSON envelope body, or null when it is not JSON at all.

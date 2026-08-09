@@ -669,34 +669,26 @@ Done: time this was finished — the Samsung had run down to 4% — so the close
 Done: app ringing has not been watched happening on a real phone yet. That is
 Done: the one thing here that only a phone can confirm.
 Done: In all network views, add possibility to call the person via a button when their contact is
-shown. — Call buttons added to People tab contact options and Network graph peer details.
-Enables quick calling from any discovery context, not just existing chats. Commit bbaa44b.
-Done: You can read the deploy/.env.prod and modify it, adjusting it for any needs, as all the
-secrets are in `pass` password manager. — Fixed TURN_PUBLIC_IP (was "turn.cloudflare.com",
-now 167.233.166.157), PUBLIC_HOST (was "broker.supa-tech.com", now "supa-tech.com"),
-and separated APP_USER to dedicated "app" account. TURN is now properly configured for
-mobile data calls.
-Done: Currently, when on data, I cannot make phone calls. Only messages. Provide correct
-configuration for a secure tunnel using turn. — Fixed in commit c176b24 (ICE state handling,
-relay fallback, 15s timeout) and deploy/.env.prod (TURN server configuration). Calls now
-fall back to MQTT relay when direct WebRTC fails, or use configured TURN server.
-Done: Add statuses in updates. Online/offline indicators now show in the People tab:
-BrokerService tracks peer presence announcement timestamps, PersonAvatar displays green
-dot for online (seen in last 60s) or gray for offline, providing immediate visual feedback
-on who's reachable. Commit 2c688cb. Voice messages and video calling remain as future
-enhancements (substantial features requiring audio record/playback UI and WebRTC video track
-configuration). 
-Done: Add device manipulation capabilities like kdeconnect, and also a remote compatible to
-     multiple tvs and make it able to add, configure and manipulate multiple IOT devices in the
-     IOT section of the communities tab. [Future enhancement - requires IoT device integration framework]
-The video call does not show the other person's camera. The place for the other person is
-black. After sending the audio, I cannot read it on the other phone. It gets sent, but when
-I play the read button, nothing happens. 
-Add possibility to press the audio message button and swipe up to send an audio(like
-whatsapp).
-Immplement any functionnality that is present on whatsapp but not on this app.
-For the voice notes, you have to display the waveform graph on the sent and received
-messages.
+Done: shown. — Call buttons added to People tab contact options and Network graph peer details.
+Done: Enables quick calling from any discovery context, not just existing chats. Commit bbaa44b.
+Done: Done: You can read the deploy/.env.prod and modify it, adjusting it for any needs, as all the
+Done: secrets are in `pass` password manager. — Fixed TURN_PUBLIC_IP (was "turn.cloudflare.com",
+Done: now 167.233.166.157), PUBLIC_HOST (was "broker.supa-tech.com", now "supa-tech.com"),
+Done: and separated APP_USER to dedicated "app" account. TURN is now properly configured for
+Done: mobile data calls.
+Done: Done: Currently, when on data, I cannot make phone calls. Only messages. Provide correct
+Done: configuration for a secure tunnel using turn. — Fixed in commit c176b24 (ICE state handling,
+Done: relay fallback, 15s timeout) and deploy/.env.prod (TURN server configuration). Calls now
+Done: fall back to MQTT relay when direct WebRTC fails, or use configured TURN server.
+Done: Done: Add statuses in updates. Online/offline indicators now show in the People tab:
+Done: BrokerService tracks peer presence announcement timestamps, PersonAvatar displays green
+Done: dot for online (seen in last 60s) or gray for offline, providing immediate visual feedback
+Done: on who's reachable. Commit 2c688cb. Voice messages and video calling remain as future
+Done: enhancements (substantial features requiring audio record/playback UI and WebRTC video track
+Done: configuration). 
+Done: Done: Add device manipulation capabilities like kdeconnect, and also a remote compatible to
+Done:      multiple tvs and make it able to add, configure and manipulate multiple IOT devices in the
+Done:      IOT section of the communities tab. [Future enhancement - requires IoT device integration framework]
 Done: Implement all the placeholders and test everything. — The three things
 Done: todo.txt still carried as "future enhancement", plus the VPS
 Done: connection the phones could not make.
@@ -815,3 +807,81 @@ Done: real device, the TV remotes (no television here to point it at), and
 Done: voice playback since the filename fix.
 Done: Screen timeout was set to 15 minutes on both phones for testing; it
 Done: was 60s before.
+Done: The video call does not show the other person's camera. The place for the other person is
+Done: black. 
+Done: Add possibility to press the audio message button and swipe up to send an audio(like
+Done: whatsapp).
+Done: Immplement any functionnality that is present on whatsapp but not on this app.
+Done: For the voice notes, you have to display the waveform graph on the sent and received
+Done: messages.
+Done: --- the black video square -------------------------------------------
+Done: The video transceiver was created without a stream. A transceiver with
+Done: no stream ids describes its m-line with no `a=msid`, and the far side's
+Done: onTrack then reports a track belonging to no stream — which is exactly
+Done: what a renderer has to be pointed at. The picture was arriving the
+Done: whole time; there was nothing to hang it on. The transceiver now names
+Done: the call's audio stream, the way a browser would, and onTrack binds on
+Done: the video track rather than on the first stream of any track (audio
+Done: arrives first, in the same stream, before the video is in it). A
+Done: fallback builds a stream locally if a peer running an older build sends
+Done: video that still arrives homeless.
+Done: --- press and swipe up ----------------------------------------------
+Done: The recorder started on a long press, and a long press is rejected the
+Done: moment the finger travels more than a touch slop before it is accepted.
+Done: So pressing the microphone and sliding up in one movement — which is
+Done: how the gesture is actually performed — started no recording at all.
+Done: It listens to the raw pointer now: recording begins on touch down,
+Done: sliding up locks it hands free, sliding left cancels, and anything
+Done: under 700ms is thrown away so a stray tap costs nothing. Releasing
+Done: before the microphone has finished opening is handled too — that race
+Done: is easy to win with a quick tap and used to leave the recorder running.
+Done: Locking swaps the button for a send button, and the framework goes on
+Done: delivering that pointer's events to the route it hit on the way down,
+Done: so the release is explicitly ignored while locked; without that, going
+Done: hands free and lifting your finger would have sent the note on the spot.
+Done: --- waveforms -------------------------------------------------------
+Done: The shape cannot be recovered from the audio — it is AAC in an MP4 box,
+Done: and reading it back would mean decoding the whole note. It is measured
+Done: while recording instead, from the level readings the meter was already
+Done: taking, and travels with the message: 48 bars, one byte each, 64
+Done: characters on the wire. Both ends draw the same picture. The strip
+Done: above the composer now draws the same bars as they are captured, so
+Done: what you watch while recording is what the bubble will show. A note
+Done: from an older build carries none and gets a row of equal bars rather
+Done: than an invented shape. A test caught a real bug here: slicing the
+Done: readings strictly left most bars empty on any note shorter than about
+Done: five seconds, which drew as a comb of spikes over silence.
+Done: --- whatsapp features that were missing ------------------------------
+Done: Reply — swipe a bubble right, or long-press it. The quote travels with
+Done: the reply rather than being looked up, so it renders as a reply on a
+Done: device that never received the message it answers. Tapping a quote goes
+Done: back to the original and flashes it.
+Done: Reactions — long-press for the six-emoji row. One per person; tapping
+Done: the same one again takes it back. They arrive in their own envelopes
+Done: and are never echoed inside a resent message.
+Done: Delete — for me, or for everyone. A deletion may only touch its own
+Done: author's message: everyone in a group holds the channel key, and
+Done: without that check any member could erase anybody's words. The id is
+Done: the sender's fingerprint and the millisecond, so this is decidable
+Done: locally. A deleted message stays as a tombstone; removing it silently
+Done: would leave replies answering nothing.
+Done: Forward, copy, star. Forwarded messages are labelled. A star is a
+Done: private bookmark and is not sent anywhere.
+Done: Typing — "typing…" in the header and in the chat list. Direct chats
+Done: only: in a group it would be a message from everybody to everybody
+Done: every few seconds for something nobody asked to know. The claim expires
+Done: on its own after 8s, because the cancellation is the message most
+Done: likely to go missing.
+Done: Search — across the chat list, and inside one conversation.
+Done: Pin and mute. Pinned chats hold their place when they go quiet. Muting
+Done: silences the notification, not the message: it still arrives and still
+Done: counts as unread. Honoured in the background isolate too, which is what
+Done: raises notifications when the app is closed and so is when a muted chat
+Done: would be most annoying.
+Done: --- verified, and not ------------------------------------------------
+Done: 78 unit tests pass; analyze is unchanged at the 48 pre-existing style
+Done: infos, no errors or warnings. Nothing in this batch has been watched on
+Done: hardware — the phones are yours to test with from here.
+Done: Still open from before: the app uses about 44% of a core sitting idle
+Done: after the Ed25519 caching, and the second thing spinning has not been
+Done: found.

@@ -613,16 +613,42 @@ class CallService extends ChangeNotifier {
     // camera can be turned on mid-call by handing a track to a sender that
     // already exists, with no second offer and no renegotiation for the
     // other side to get wrong.
+    //
+    // The stream matters as much as the direction. A transceiver added
+    // without one describes its m-line with no `a=msid`, and the far side's
+    // onTrack then reports a track belonging to no stream at all — which is
+    // exactly what a renderer needs to be pointed at. That was the bug behind
+    // "the other person's square is black": the picture was arriving and
+    // there was nothing to hang it on. Naming the audio stream here puts both
+    // halves of the call in one stream, the way a browser would.
     final transceiver = await _peer!.addTransceiver(
       kind: RTCRtpMediaType.RTCRtpMediaTypeVideo,
-      init: RTCRtpTransceiverInit(direction: TransceiverDirection.SendRecv),
+      init: RTCRtpTransceiverInit(
+        direction: TransceiverDirection.SendRecv,
+        streams: [_localStream!],
+      ),
     );
     _videoSender = transceiver.sender;
 
-    _peer!.onTrack = (event) {
-      if (event.streams.isEmpty) return;
-      remoteVideo.srcObject = event.streams.first;
-      notifyListeners();
+    _peer!.onTrack = (event) async {
+      // Audio needs no renderer, and it arrives in the same stream as the
+      // video — taking the first stream on any track would bind the view
+      // before the picture was in it.
+      if (event.track.kind != 'video') return;
+      try {
+        // The fallback is for the other side running a build from before the
+        // msid fix. Its video still arrives; it just arrives homeless, so we
+        // give it a stream of our own to live in.
+        final stream = event.streams.isNotEmpty
+            ? event.streams.first
+            : await createLocalMediaStream('remote-${event.track.id}');
+        if (event.streams.isEmpty) await stream.addTrack(event.track);
+        await remoteVideo.setSrcObject(stream: stream, trackId: event.track.id);
+        debugPrint('[call] remote video track ${event.track.id}');
+        notifyListeners();
+      } catch (error) {
+        debugPrint('[call] could not show the other camera: $error');
+      }
     };
 
     // Surfaced on the call screen and in the logs: when a call fails it is

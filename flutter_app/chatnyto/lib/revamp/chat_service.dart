@@ -30,6 +30,8 @@ class ChatEntry {
     this.unread = 0,
     this.lastFromMe = false,
     this.lastStatus,
+    this.pinned = false,
+    this.muted = false,
   }) : admins = admins ?? [];
 
   String id; // 'dm:<fingerprint>' or 'group:<slug>'
@@ -61,6 +63,13 @@ class ChatEntry {
   bool lastFromMe;
   MessageStatus? lastStatus;
 
+  /// Held at the top of the list regardless of when it last had a message.
+  bool pinned;
+
+  /// Still arrives, still counts as unread, but says nothing out loud. Both
+  /// are this device's arrangement of its own list and are not sent anywhere.
+  bool muted;
+
   bool get isDm => kind == 'dm';
   bool get isPublicGroup => kind == 'group' && secret.isEmpty;
 
@@ -84,6 +93,8 @@ class ChatEntry {
         'unread': unread,
         'mine': lastFromMe,
         if (lastStatus != null) 'lastStatus': lastStatus!.name,
+        if (pinned) 'pin': true,
+        if (muted) 'mute': true,
       };
 
   static ChatEntry fromJson(Map<String, dynamic> json) => ChatEntry(
@@ -106,6 +117,8 @@ class ChatEntry {
         lastStatus: MessageStatus.values
             .where((s) => s.name == json['lastStatus'])
             .firstOrNull,
+        pinned: json['pin'] == true,
+        muted: json['mute'] == true,
       );
 }
 
@@ -142,8 +155,16 @@ class RevampMessage {
     this.image,
     this.audio,
     this.audioMs = 0,
+    this.waveform,
+    this.replyTo,
+    this.replyName,
+    this.replyText,
+    this.forwarded = false,
+    this.deleted = false,
+    Map<String, String>? reactions,
+    this.starred = false,
     this.status = MessageStatus.sent,
-  });
+  }) : reactions = reactions ?? {};
 
   final String from; // sender fingerprint ('' when anonymous)
   final String name;
@@ -162,14 +183,59 @@ class RevampMessage {
   /// just to draw the list.
   final int audioMs;
 
+  /// The note's shape: base64 of one byte a bar, measured while it was
+  /// recorded. Sent with the message because it cannot be recovered from the
+  /// audio without decoding it, and because both ends should be looking at
+  /// the same picture of what was said. Absent on notes from older builds,
+  /// which is why everything that draws it treats null as ordinary.
+  final String? waveform;
+
+  /// The message being answered, when this one is a reply.
+  ///
+  /// The quoted author and text travel with the reply rather than being
+  /// looked up. A reply has to render as a reply on a device that never
+  /// received the message it answers — one that joined the group later, or
+  /// was offline for the part of the conversation being quoted — and a
+  /// dangling id would render as nothing at all.
+  final String? replyTo;
+  final String? replyName;
+  final String? replyText;
+
+  /// Passed on from another conversation, and labelled as such: it matters
+  /// whether the person you are talking to wrote this or repeated it.
+  final bool forwarded;
+
+  /// Taken back by its sender. The message stays in place as a tombstone —
+  /// removing it silently would leave the other person's replies answering
+  /// nothing, and a gap in a conversation is its own kind of lie.
+  bool deleted;
+
+  /// Who reacted, and with what: fingerprint to emoji, one each. Local
+  /// state, not part of the message — reactions arrive afterwards, in their
+  /// own envelopes, and are applied to the message they name.
+  final Map<String, String> reactions;
+
+  /// Kept by this device only. Starring is a private bookmark; there is no
+  /// reason for the other end to learn what you found worth keeping.
+  bool starred;
+
   /// Changes as receipts come back, so it is not final. Never sent over the
   /// wire: it is what *this* device knows about a message's progress, and
   /// the other end has its own view.
   MessageStatus status;
 
+  /// Names this message everywhere it has to be referred to — a reply's
+  /// target, a reaction's subject, a deletion's victim.
+  ///
+  /// The sender and the millisecond they sent it. Nobody sends two messages
+  /// in the same millisecond, and it needs no coordination between devices,
+  /// which an allocated id would.
+  String get id => '$from-$ts';
+
   bool get isRich => delta != null && delta!.isNotEmpty;
   bool get hasImage => image != null && image!.isNotEmpty;
   bool get hasAudio => audio != null && audio!.isNotEmpty;
+  bool get isReply => replyTo != null && replyTo!.isNotEmpty;
 
   Map<String, dynamic> toJson() => {
         'f': from,
@@ -180,14 +246,29 @@ class RevampMessage {
         if (hasImage) 'img': image,
         if (hasAudio) 'aud': audio,
         if (hasAudio) 'ams': audioMs,
+        if (hasAudio && waveform != null) 'wav': waveform,
+        if (isReply) 'rt': replyTo,
+        if (isReply) 'rn': replyName,
+        if (isReply) 'rx': replyText,
+        if (forwarded) 'fw': true,
+        if (deleted) 'del': true,
         // Stored so the ticks survive a restart.
         's': status.name,
+        if (reactions.isNotEmpty) 'rcs': reactions,
+        if (starred) 'star': true,
       };
 
-  /// What actually goes over the wire. The status is left out on purpose:
-  /// it is one device's account of a message's progress, and telling the
-  /// other end "this is delivered" before it has it would be nonsense.
-  Map<String, dynamic> toWire() => toJson()..remove('s');
+  /// What actually goes over the wire.
+  ///
+  /// Three things are stripped. The status is one device's account of a
+  /// message's progress, and telling the other end "this is delivered"
+  /// before it has it would be nonsense. The reactions arrive in their own
+  /// envelopes and would otherwise be echoed back as part of a resend. And a
+  /// star is a private bookmark.
+  Map<String, dynamic> toWire() => toJson()
+    ..remove('s')
+    ..remove('rcs')
+    ..remove('star');
 
   static RevampMessage? fromJson(Map<String, dynamic> json) {
     try {
@@ -201,6 +282,16 @@ class RevampMessage {
         image: json['img'] as String?,
         audio: json['aud'] as String?,
         audioMs: (json['ams'] as num?)?.toInt() ?? 0,
+        waveform: json['wav'] as String?,
+        replyTo: json['rt'] as String?,
+        replyName: json['rn'] as String?,
+        replyText: json['rx'] as String?,
+        forwarded: json['fw'] == true,
+        deleted: json['del'] == true,
+        reactions: json['rcs'] == null
+            ? null
+            : Map<String, String>.from(json['rcs'] as Map),
+        starred: json['star'] == true,
         status: MessageStatus.values.firstWhere(
           (s) => s.name == json['s'],
           orElse: () => MessageStatus.sent,
@@ -264,8 +355,7 @@ class ChatService extends ChangeNotifier {
   bool _wasConnected = false;
 
   List<ChatEntry> get chats {
-    final sorted = List<ChatEntry>.from(_chats)
-      ..sort((a, b) => b.lastTs.compareTo(a.lastTs));
+    final sorted = List<ChatEntry>.from(_chats)..sort(compareChats);
     return sorted;
   }
 
@@ -297,6 +387,10 @@ class ChatService extends ChangeNotifier {
     _pendingReceipts.clear();
     _receiptTimer?.cancel();
     _receiptTimer = null;
+    _typingUntil.clear();
+    _typingSentAt.clear();
+    _typingSweep?.cancel();
+    _typingSweep = null;
     _myFingerprint = null;
     _initialized = false;
     notifyListeners();
@@ -662,7 +756,10 @@ class ChatService extends ChangeNotifier {
       {List<dynamic>? delta,
       String? image,
       String? audio,
-      int audioMs = 0}) async {
+      int audioMs = 0,
+      String? waveform,
+      RevampMessage? replyTo,
+      bool forwarded = false}) async {
     final key = await _keyFor(chat);
     if (key == null) return false;
     String from = '';
@@ -681,6 +778,13 @@ class ChatService extends ChangeNotifier {
       image: image,
       audio: audio,
       audioMs: audioMs,
+      waveform: waveform,
+      replyTo: replyTo?.id,
+      // The name as it was, never "You": the quote is read by the other
+      // person, for whom "you" means somebody else.
+      replyName: replyTo?.name,
+      replyText: replyTo == null ? null : quotedPreview(replyTo),
+      forwarded: forwarded,
       status: BrokerService.instance.anyConnected
           ? MessageStatus.sent
           : MessageStatus.pending,
@@ -695,6 +799,285 @@ class ChatService extends ChangeNotifier {
       await _saveOutbox();
     }
     return true;
+  }
+
+  /// The one line of a quoted message that travels with a reply.
+  ///
+  /// Bounded, because it is a copy: a reply to a long message must not carry
+  /// the long message, and a reply to a photo must not carry the photo.
+  static String quotedPreview(RevampMessage message) {
+    if (message.deleted) return deletedLabel;
+    final text = message.text.trim();
+    if (text.isEmpty) return message.hasImage ? '📷 Photo' : '';
+    return text.length <= 140 ? text : '${text.substring(0, 139)}…';
+  }
+
+  /// What a message that was taken back says where it used to be.
+  static const deletedLabel = 'This message was deleted';
+
+  /// Whether [by] is allowed to take back the message named by [target].
+  ///
+  /// A message id is its sender's fingerprint and the millisecond they sent
+  /// it, so the sender is in the name and this is decidable without asking
+  /// anyone. It has to be: everyone in a group holds the channel key, and
+  /// without this check any of them could erase anybody's words — which is
+  /// worse than the thing deletion is for.
+  static bool mayDelete({required String target, required String by}) {
+    if (by.isEmpty || target.isEmpty) return false;
+    // An anonymous message ('' for the sender) has an id starting with '-',
+    // which no fingerprint can claim. Nobody gets to take those back.
+    return target.startsWith('$by-');
+  }
+
+  // --------------------------------------------------------- reacting
+
+  /// Puts [emoji] on [message], or takes ours off when it is the one already
+  /// there — the second tap on a reaction is how it is removed everywhere.
+  ///
+  /// One reaction per person, so reacting again replaces rather than adds.
+  Future<void> react(
+      ChatEntry chat, RevampMessage message, String emoji) async {
+    final me = await _fingerprint();
+    final removing = message.reactions[me] == emoji;
+    if (removing) {
+      message.reactions.remove(me);
+    } else {
+      message.reactions[me] = emoji;
+    }
+    await _saveMessages(chat);
+    notifyListeners();
+    final key = await _keyFor(chat);
+    if (key == null) return;
+    final envelope = await MessageCrypto.encryptEnvelope(
+      jsonEncode({
+        'type': 'reaction',
+        'to': message.id,
+        'emo': removing ? '' : emoji,
+        'from': me,
+      }),
+      key,
+    );
+    BrokerService.instance.publishToAll(chat.topic, envelope);
+  }
+
+  Future<void> _applyReaction(
+      ChatEntry chat, Map<String, dynamic> data) async {
+    final from = data['from'] as String? ?? '';
+    if (from.isEmpty || from == await _fingerprint()) return;
+    final target = data['to'] as String? ?? '';
+    final emoji = data['emo'] as String? ?? '';
+    // Deliberately not loading a conversation that is not open, for the same
+    // reason receipts don't: decrypting megabytes to record a thumbs-up on a
+    // message nobody is looking at would stall the interface. It is applied
+    // when the chat is next opened and the reaction is re-sent — and if it
+    // is not, a lost reaction is a lost reaction, not a lost message.
+    final list = _messages[chat.id];
+    if (list == null) return;
+    final message = list.where((m) => m.id == target).firstOrNull;
+    if (message == null) return;
+    if (emoji.isEmpty) {
+      if (message.reactions.remove(from) == null) return;
+    } else {
+      if (message.reactions[from] == emoji) return;
+      message.reactions[from] = emoji;
+    }
+    await _saveMessages(chat);
+    notifyListeners();
+  }
+
+  // --------------------------------------------------------- deleting
+
+  /// Takes a message back for everybody. Only its own sender may.
+  Future<String?> deleteForEveryone(
+      ChatEntry chat, RevampMessage message) async {
+    final me = await _fingerprint();
+    if (message.from.isEmpty || message.from != me) {
+      return 'Only the person who sent a message can take it back.';
+    }
+    _tombstone(message);
+    await _saveMessages(chat);
+    if (chat.lastTs == message.ts) {
+      chat.lastMessage = deletedLabel;
+      await _saveChats();
+    }
+    notifyListeners();
+    final key = await _keyFor(chat);
+    if (key == null) return null;
+    final envelope = await MessageCrypto.encryptEnvelope(
+      jsonEncode({'type': 'delete', 'to': message.id, 'from': me}),
+      key,
+    );
+    BrokerService.instance.publishToAll(chat.topic, envelope);
+    return null;
+  }
+
+  /// Removes a message from this device only. The other end keeps its copy —
+  /// which is the honest meaning of the option, and why it is worded that
+  /// way in the menu.
+  Future<void> deleteForMe(ChatEntry chat, RevampMessage message) async {
+    final list = _messages[chat.id];
+    if (list == null) return;
+    list.removeWhere((m) => m.id == message.id);
+    await _saveMessages(chat);
+    if (chat.lastTs == message.ts) {
+      final last = list.isEmpty ? null : list.last;
+      chat.lastMessage = last?.text ?? '';
+      chat.lastTs = last?.ts ?? 0;
+      chat.lastFromMe = last != null &&
+          last.from.isNotEmpty &&
+          last.from == await _fingerprint();
+      chat.lastStatus = chat.lastFromMe ? last?.status : null;
+      await _saveChats();
+    }
+    notifyListeners();
+  }
+
+  Future<void> _applyDelete(ChatEntry chat, Map<String, dynamic> data) async {
+    final from = data['from'] as String? ?? '';
+    final target = data['to'] as String? ?? '';
+    if (from.isEmpty || target.isEmpty) return;
+    if (from == await _fingerprint()) return;
+    if (!mayDelete(target: target, by: from)) return;
+    final list = _messages[chat.id];
+    if (list != null) {
+      final message = list.where((m) => m.id == target).firstOrNull;
+      if (message != null && !message.deleted) {
+        _tombstone(message);
+        await _saveMessages(chat);
+      }
+    }
+    // The preview in the chat list is kept right even when the conversation
+    // is not open, which is the one thing that is visible from outside it.
+    final ts = int.tryParse(target.split('-').last) ?? 0;
+    if (chat.lastTs == ts && chat.lastMessage != deletedLabel) {
+      chat.lastMessage = deletedLabel;
+      await _saveChats();
+    }
+    notifyListeners();
+  }
+
+  /// Empties a message of everything but the fact that it was here.
+  void _tombstone(RevampMessage message) {
+    message.deleted = true;
+    message.reactions.clear();
+    message.starred = false;
+  }
+
+  // ----------------------------------------------------------- typing
+
+  /// How long a "typing" claim is believed for.
+  ///
+  /// It expires on its own rather than waiting to be cancelled, because the
+  /// cancellation is the message most likely to be the one that goes
+  /// missing — a phone that loses its network mid-sentence would otherwise
+  /// leave the other person watching "typing…" forever.
+  static const _typingLifetime = Duration(seconds: 8);
+
+  /// How often the claim is repeated while somebody keeps typing. Comfortably
+  /// inside the lifetime, so a long message never flickers.
+  static const _typingRefresh = Duration(seconds: 4);
+
+  final Map<String, DateTime> _typingUntil = {};
+  final Map<String, DateTime> _typingSentAt = {};
+  Timer? _typingSweep;
+
+  /// Whether the other person in [chatId] is writing something right now.
+  bool isTyping(String chatId) {
+    final until = _typingUntil[chatId];
+    return until != null && until.isAfter(DateTime.now());
+  }
+
+  /// Says whether we are writing. Cheap to call on every keystroke: while
+  /// [typing] stays true it publishes at most once per [_typingRefresh], and
+  /// the stop is sent immediately because that is the one worth being prompt
+  /// about.
+  ///
+  /// Only in direct chats. In a group it would be a message from everybody
+  /// to everybody every few seconds, for something nobody asked to know.
+  Future<void> setTyping(ChatEntry chat, bool typing) async {
+    if (!chat.isDm) return;
+    final now = DateTime.now();
+    if (typing) {
+      final last = _typingSentAt[chat.id];
+      if (last != null && now.difference(last) < _typingRefresh) return;
+      _typingSentAt[chat.id] = now;
+    } else {
+      if (_typingSentAt.remove(chat.id) == null) return;
+    }
+    if (!BrokerService.instance.anyConnected) return;
+    final key = await _keyFor(chat);
+    if (key == null) return;
+    final envelope = await MessageCrypto.encryptEnvelope(
+      jsonEncode({
+        'type': 'typing',
+        'on': typing,
+        'from': await _fingerprint(),
+      }),
+      key,
+    );
+    BrokerService.instance.publishToAll(chat.topic, envelope);
+  }
+
+  Future<void> _applyTyping(ChatEntry chat, Map<String, dynamic> data) async {
+    if (data['from'] == await _fingerprint()) return;
+    if (data['on'] == true) {
+      _typingUntil[chat.id] = DateTime.now().add(_typingLifetime);
+      // One sweep for all conversations, running only while somebody is
+      // actually typing, so an idle app has no timer at all.
+      _typingSweep ??= Timer.periodic(const Duration(seconds: 1), (timer) {
+        final now = DateTime.now();
+        final before = _typingUntil.length;
+        _typingUntil.removeWhere((_, until) => !until.isAfter(now));
+        if (_typingUntil.isEmpty) {
+          timer.cancel();
+          _typingSweep = null;
+        }
+        if (_typingUntil.length != before) notifyListeners();
+      });
+    } else if (_typingUntil.remove(chat.id) == null) {
+      return;
+    }
+    notifyListeners();
+  }
+
+  // ------------------------------------------------------ pin and mute
+
+  /// The order of the chat list: pinned first, newest first within each
+  /// group. A pinned chat that has gone quiet is meant to stay where it was
+  /// put — that is the whole point of pinning it.
+  static int compareChats(ChatEntry a, ChatEntry b) {
+    if (a.pinned != b.pinned) return a.pinned ? -1 : 1;
+    return b.lastTs.compareTo(a.lastTs);
+  }
+
+  Future<void> setPinned(ChatEntry chat, bool pinned) async {
+    if (chat.pinned == pinned) return;
+    chat.pinned = pinned;
+    await _saveChats();
+    notifyListeners();
+  }
+
+  Future<void> setMuted(ChatEntry chat, bool muted) async {
+    if (chat.muted == muted) return;
+    chat.muted = muted;
+    await _saveChats();
+    notifyListeners();
+  }
+
+  /// Whether a chat should raise a notification. Muting silences the buzz,
+  /// not the message: it still arrives, and still counts as unread.
+  bool isMuted(String chatId) =>
+      _chats.where((c) => c.id == chatId).firstOrNull?.muted ?? false;
+
+  // --------------------------------------------------------- starring
+
+  /// A private bookmark. Nothing is sent, and nothing changes for anybody
+  /// else.
+  Future<void> toggleStar(ChatEntry chat, RevampMessage message) async {
+    if (message.deleted) return;
+    message.starred = !message.starred;
+    await _saveMessages(chat);
+    notifyListeners();
   }
 
   Future<void> _flushOutbox() async {
@@ -1042,6 +1425,11 @@ class ChatService extends ChangeNotifier {
     }
     if (isPlumbingEnvelope(data)) return null;
 
+    // Muting has to be honoured here as well as in the running app: this
+    // isolate is what raises the notification when ChatNyto is closed, which
+    // is precisely when a muted conversation would be most annoying.
+    if (chat.muted) return null;
+
     final message = RevampMessage.fromJson(data);
     if (message == null) return null;
     return BackgroundRead(
@@ -1108,6 +1496,18 @@ class ChatService extends ChangeNotifier {
       await _applyReceipt(chat, data);
       return;
     }
+    if (data['type'] == 'reaction') {
+      await _applyReaction(chat, data);
+      return;
+    }
+    if (data['type'] == 'delete') {
+      await _applyDelete(chat, data);
+      return;
+    }
+    if (data['type'] == 'typing') {
+      await _applyTyping(chat, data);
+      return;
+    }
     if (data['type'] == 'group_rename' ||
         data['type'] == 'group_delete' ||
         data['type'] == 'group_admins') {
@@ -1122,11 +1522,17 @@ class ChatService extends ChangeNotifier {
       await _append(chat, message, countUnread: false);
       return;
     }
+    // They have finished the sentence; it is here. Waiting for the "stopped
+    // typing" that follows would leave the indicator up underneath the
+    // message it was announcing.
+    _typingUntil.remove(chat.id);
     final isNew = await _append(chat, message, countUnread: true);
     // Acknowledged whether or not it is new: a resend usually means the
     // first receipt was the part that went missing.
     _acknowledge(chat, message.ts);
-    if (isNew) {
+    // A muted conversation still arrives and still counts as unread. What it
+    // does not do is make a noise.
+    if (isNew && !chat.muted) {
       await NotificationService.instance.showMessage(
         chatId: chat.id,
         chatTitle: chat.title,
