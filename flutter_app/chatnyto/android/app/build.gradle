@@ -1,4 +1,4 @@
-// ~/Documents/git/chatnyto/flutter_app/chatnyto/android/app/build.gradle 25 Jul 2026 at 09:25:01 PM
+// ~/Documents/git/chatnyto/flutter_app/chatnyto/android/app/build.gradle 09 Aug 2026 at 09:54:25 AM
 plugins {
     id "com.android.application"
     id "kotlin-android"
@@ -69,4 +69,6 @@ flutter {
 
 dependencies {
     coreLibraryDesugaring "com.android.tools:desugar_jdk_libs:2.1.4"
+    implementation 'dev.rikka.shizuku:api:13.1.5'
+    implementation 'dev.rikka.shizuku:provider:13.1.5'
 }
